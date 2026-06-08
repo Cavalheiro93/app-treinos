@@ -253,7 +253,7 @@ function openModal(html){
   $("#modalContent").innerHTML = '<div class="grabber"></div>' + html;
   $("#modalBg").classList.add("show");
 }
-function closeModal(){ $("#modalBg").classList.remove("show"); }
+function closeModal(){ $("#modalBg").classList.remove("show"); stopAlarm(); }
 $("#modalBg").addEventListener("click", e=>{ if(e.target.id==="modalBg") closeModal(); });
 
 function fmtData(iso){
@@ -741,6 +741,7 @@ window._delSess = (id)=>{ sessoes = sessoes.filter(s=>s.id!==id); salvarSessoes(
 
 /* ===================== Cronômetro de descanso ===================== */
 let timerInt=null, timerRem=0, timerTotal=0;
+let alarmInt=null;
 let audioCtx=null;
 function ensureAudio(){
   try{
@@ -779,6 +780,17 @@ function beep(){
     });
   }catch(e){}
 }
+/* alarme contínuo: repete o beep + vibração até o usuário fechar o cronômetro */
+function startAlarm(){
+  stopAlarm();
+  beep();
+  if(navigator.vibrate) navigator.vibrate([200,100,200]);
+  alarmInt = setInterval(()=>{
+    beep();
+    if(navigator.vibrate) navigator.vibrate([200,100,200]);
+  }, 1700);
+}
+function stopAlarm(){ if(alarmInt){ clearInterval(alarmInt); alarmInt=null; releaseWakeLock(); } }
 function renderTimerModal(){
   const m = Math.floor(timerRem/60), s = timerRem%60;
   const disp = `${m}:${String(s).padStart(2,'0')}`;
@@ -797,7 +809,7 @@ function renderTimerModal(){
       <button class="btn-ghost full" onclick="stopTimer(); renderTimerModal()">Zerar</button>
       <button class="btn full" onclick="closeModal()">Fechar</button>
     </div>
-    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔆 a tela fica ligada durante o descanso</p>`;
+    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔆 a tela fica ligada durante o descanso · 🔔 o alarme toca até você tocar em <b>Fechar</b></p>`;
 }
 window.abrirTimer = ()=>{
   $("#modalBg").classList.add("show");
@@ -819,7 +831,7 @@ async function releaseWakeLock(){
 }
 // se a tela voltar a ficar visível e o cronômetro ainda estiver rodando, reativa
 document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState==="visible" && timerInt && !wakeLock) requestWakeLock();
+  if(document.visibilityState==="visible" && (timerInt || alarmInt) && !wakeLock) requestWakeLock();
 });
 
 window.startTimer = (secs)=>{
@@ -832,10 +844,11 @@ window.startTimer = (secs)=>{
     timerRem--;
     updateTimerDisplay();
     if(timerRem<=0){
-      stopTimer(); beep();
-      if(navigator.vibrate) navigator.vibrate([200,100,200]);
+      // para a contagem mas mantém a tela ligada enquanto o alarme toca
+      if(timerInt){ clearInterval(timerInt); timerInt=null; }
       const d=$("#timerDisp"); if(d){ d.textContent="0:00"; }
       toast("Descanso acabou! 🔔");
+      startAlarm();
     }
   },1000);
 };
@@ -846,7 +859,7 @@ function updateTimerDisplay(){
   d.classList.toggle("warn", timerRem<=5 && timerRem>0);
 }
 window.addTimer = (s)=>{ timerRem+=s; if(!timerInt) startTimer(timerRem); else updateTimerDisplay(); };
-window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } releaseWakeLock(); };
+window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } stopAlarm(); releaseWakeLock(); };
 $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 
 /* ===================== Config ===================== */
