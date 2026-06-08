@@ -79,9 +79,15 @@
   /* exercício na tela de treino */
   .ex{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); margin-bottom:12px; overflow:hidden}
   .ex.done{border-color:var(--ok)}
-  .ex-head{display:flex; align-items:center; gap:10px; padding:14px}
-  .ex-head b{flex:1; font-size:15px}
+  .ex-head{display:flex; align-items:center; gap:10px; padding:14px; cursor:pointer; user-select:none}
+  .ex-head-main{flex:1; min-width:0; display:flex; flex-direction:column; gap:3px}
+  .ex-head-main b{font-size:15px}
   .ex-head .target{color:var(--muted); font-size:12px; font-weight:600}
+  .ex-prog{flex:none; font-size:13px; font-weight:700; color:var(--muted); background:var(--card2);
+    border:1px solid var(--line); border-radius:999px; padding:3px 10px; white-space:nowrap}
+  .ex-prog.done{color:var(--ok); border-color:var(--ok); background:rgba(57,217,138,.12)}
+  .ex-chev{flex:none; color:var(--muted); font-size:16px; transition:transform .15s}
+  .ex.open .ex-chev{transform:rotate(90deg)}
   .ex-sets{padding:0 14px 14px}
   .set-row{display:grid; grid-template-columns:64px 1fr 1fr 44px; gap:8px; align-items:center; margin-bottom:8px}
   .set-row input{padding:10px; text-align:center}
@@ -345,7 +351,8 @@ function renderSessaoAtiva(v){
     <h2 style="margin:0">${esc(s.fichaNome)}</h2>
     <div class="muted">${fmtData(s.data)} · treino em andamento</div>
     <div class="muted" style="margin-top:8px; font-size:12px; line-height:1.4">
-      Toque no <b>número da série</b> para marcar
+      Toque no <b>exercício</b> para abrir as séries. Dentro dele, toque no
+      <b>número da série</b> para marcar
       <span style="color:var(--warn)">🔥 Aquecimento</span> ou
       <span style="color:var(--accent)">⚡ Preparação</span>.
     </div>
@@ -353,31 +360,40 @@ function renderSessaoAtiva(v){
 
   s.itens.forEach((it, ei)=>{
     const allDone = it.sets.every(x=>x.feito);
-    html += `<div class="ex ${allDone?'done':''}">
-      <div class="ex-head">
-        <b>${esc(it.nome)}</b>
-        <span class="target">meta: ${esc(it.series||'-')}×${esc(it.reps||'-')}${it.carga?` · ${esc(it.carga)}`:''}</span>
-      </div>
-      <div class="ex-sets">
-        <div class="set-head"><span>Série</span><span>Carga (kg)</span><span>Reps</span><span>✓</span></div>`;
-    it.sets.forEach((set, si)=>{
-      const ti = tagInfo(set.tag);
-      const chip = ti
-        ? `<div class="set-tag ${ti.cls}" onclick="cycleTag(${ei},${si})" title="Toque para mudar">${ti.emoji}<br>${ti.label}</div>`
-        : `<div class="set-tag" onclick="cycleTag(${ei},${si})" title="Toque para marcar aquecimento/preparação">${si+1}</div>`;
-      html += `<div class="set-row">
-        ${chip}
-        <input type="number" inputmode="decimal" placeholder="—" value="${esc(set.carga)}" oninput="setVal(${ei},${si},'carga',this.value)">
-        <input type="number" inputmode="numeric" placeholder="${esc(it.reps||'—')}" value="${esc(set.reps)}" oninput="setVal(${ei},${si},'reps',this.value)">
-        <div class="chk ${set.feito?'on':''}" onclick="toggleSet(${ei},${si})">${set.feito?'✓':''}</div>
+    const feitas = it.sets.filter(x=>x.feito).length;
+    const aberto = !!it.aberto;
+    html += `<div class="ex ${allDone?'done':''} ${aberto?'open':''}">
+      <div class="ex-head" onclick="toggleEx(${ei})">
+        <div class="ex-head-main">
+          <b>${esc(it.nome)}</b>
+          <span class="target">meta: ${esc(it.series||'-')}×${esc(it.reps||'-')}${it.carga?` · ${esc(it.carga)}`:''}</span>
+        </div>
+        <span class="ex-prog ${allDone?'done':''}">${allDone?'✓ ':''}${feitas}/${it.sets.length}</span>
+        <span class="ex-chev">▸</span>
       </div>`;
-    });
-    html += `<div class="row" style="margin-top:4px">
-        <button class="btn-ghost btn-sm" onclick="addSet(${ei})">+ série</button>
-        <div class="spacer"></div>
-        <button class="btn-ghost btn-sm" onclick="abrirTimer()">⏱️ Descanso</button>
-      </div>
-    </div></div>`;
+    if(aberto){
+      html += `<div class="ex-sets">
+        <div class="set-head"><span>Série</span><span>Carga (kg)</span><span>Reps</span><span>✓</span></div>`;
+      it.sets.forEach((set, si)=>{
+        const ti = tagInfo(set.tag);
+        const chip = ti
+          ? `<div class="set-tag ${ti.cls}" onclick="cycleTag(${ei},${si})" title="Toque para mudar">${ti.emoji}<br>${ti.label}</div>`
+          : `<div class="set-tag" onclick="cycleTag(${ei},${si})" title="Toque para marcar aquecimento/preparação">${si+1}</div>`;
+        html += `<div class="set-row">
+          ${chip}
+          <input type="number" inputmode="decimal" placeholder="—" value="${esc(set.carga)}" oninput="setVal(${ei},${si},'carga',this.value)">
+          <input type="number" inputmode="numeric" placeholder="${esc(it.reps||'—')}" value="${esc(set.reps)}" oninput="setVal(${ei},${si},'reps',this.value)">
+          <div class="chk ${set.feito?'on':''}" onclick="toggleSet(${ei},${si})">${set.feito?'✓':''}</div>
+        </div>`;
+      });
+      html += `<div class="row" style="margin-top:4px">
+          <button class="btn-ghost btn-sm" onclick="addSet(${ei})">+ série</button>
+          <div class="spacer"></div>
+          <button class="btn-ghost btn-sm" onclick="abrirTimer()">⏱️ Descanso</button>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
   });
 
   html += `<div class="row" style="margin-top:6px">
@@ -402,6 +418,12 @@ window.cycleTag = (ei,si)=>{
   renderTreinar();
 };
 
+window.toggleEx = (ei)=>{
+  const it = sessaoAtiva.itens[ei];
+  it.aberto = !it.aberto;
+  if(navigator.vibrate) navigator.vibrate(8);
+  renderTreinar();
+};
 window.setVal = (ei,si,campo,val)=>{ sessaoAtiva.itens[ei].sets[si][campo]=val; };
 window.toggleSet = (ei,si)=>{
   const set = sessaoAtiva.itens[ei].sets[si];
