@@ -774,18 +774,37 @@ function renderTimerModal(){
       <button class="btn-ghost full" onclick="stopTimer(); renderTimerModal()">Zerar</button>
       <button class="btn full" onclick="closeModal()">Fechar</button>
     </div>
-    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s</p>`;
+    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔆 a tela fica ligada durante o descanso</p>`;
 }
 window.abrirTimer = ()=>{
   $("#modalBg").classList.add("show");
   renderTimerModal();
   if(!timerInt) startTimer(cfg.descanso);
 };
+/* Mantém a tela ligada enquanto o descanso roda (Wake Lock) */
+let wakeLock = null;
+async function requestWakeLock(){
+  try{
+    if("wakeLock" in navigator){
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", ()=>{ wakeLock = null; });
+    }
+  }catch(e){ /* o navegador pode negar; segue sem travar */ }
+}
+async function releaseWakeLock(){
+  try{ if(wakeLock){ await wakeLock.release(); wakeLock = null; } }catch(e){}
+}
+// se a tela voltar a ficar visível e o cronômetro ainda estiver rodando, reativa
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState==="visible" && timerInt && !wakeLock) requestWakeLock();
+});
+
 window.startTimer = (secs)=>{
   stopTimer();
   timerTotal=secs; timerRem=secs;
   ensureAudio();
   updateTimerDisplay();
+  requestWakeLock();
   timerInt = setInterval(()=>{
     timerRem--;
     updateTimerDisplay();
@@ -804,7 +823,7 @@ function updateTimerDisplay(){
   d.classList.toggle("warn", timerRem<=5 && timerRem>0);
 }
 window.addTimer = (s)=>{ timerRem+=s; if(!timerInt) startTimer(timerRem); else updateTimerDisplay(); };
-window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } };
+window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } releaseWakeLock(); };
 $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 
 /* ===================== Config ===================== */

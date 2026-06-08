@@ -1,5 +1,5 @@
-// Service worker simples: cache offline do app
-const CACHE = "treinos-v2";
+// Service worker: online busca a versão mais nova; offline usa o cache de reserva
+const CACHE = "treinos-v3";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon.png"];
 
 self.addEventListener("install", e => {
@@ -15,12 +15,29 @@ self.addEventListener("activate", e => {
 
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
+  const req = e.request;
+  const isHTML = req.mode === "navigate" ||
+    (req.headers.get("accept") || "").includes("text/html");
+
+  if (isHTML) {
+    // Network-first para a página: pega a versão atual quando há internet
+    e.respondWith(
+      fetch(req).then(resp => {
+        const copy = resp.clone();
+        caches.open(CACHE).then(c => c.put(req, copy));
+        return resp;
+      }).catch(() => caches.match(req).then(r => r || caches.match("./index.html")))
+    );
+    return;
+  }
+
+  // Demais arquivos: usa cache e atualiza em segundo plano
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      const fetchPromise = fetch(e.request).then(resp => {
+    caches.match(req).then(cached => {
+      const fetchPromise = fetch(req).then(resp => {
         if (resp && resp.status === 200 && resp.type === "basic") {
           const copy = resp.clone();
-          caches.open(CACHE).then(c => c.put(e.request, copy));
+          caches.open(CACHE).then(c => c.put(req, copy));
         }
         return resp;
       }).catch(() => cached);
