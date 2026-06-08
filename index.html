@@ -172,7 +172,10 @@
     <h1 id="topTitle">Treinar</h1>
     <div class="sub" id="topSub">Bora pra cima 💪</div>
   </div>
-  <button class="btn-ghost btn-sm" id="btnConfig">⚙️</button>
+  <div class="row" style="gap:8px">
+    <span class="pill" id="verBadge" onclick="window._forcarAtualizar&&window._forcarAtualizar()" title="Toque para forçar atualização">v…</span>
+    <button class="btn-ghost btn-sm" id="btnConfig">⚙️</button>
+  </div>
 </div>
 
 <main>
@@ -220,7 +223,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "1.3 (tela ligada no descanso)";
+const APP_VERSION = "1.6";
+const APP_BUILD = "2026-06-08 · alarme gravado";
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
 const KEY_CFG    = "gym_config_v1";
@@ -253,7 +257,7 @@ function openModal(html){
   $("#modalContent").innerHTML = '<div class="grabber"></div>' + html;
   $("#modalBg").classList.add("show");
 }
-function closeModal(){ $("#modalBg").classList.remove("show"); }
+function closeModal(){ $("#modalBg").classList.remove("show"); stopAlarm(); }
 $("#modalBg").addEventListener("click", e=>{ if(e.target.id==="modalBg") closeModal(); });
 
 function fmtData(iso){
@@ -740,8 +744,54 @@ window.excluirSessao = (id)=>{
 window._delSess = (id)=>{ sessoes = sessoes.filter(s=>s.id!==id); salvarSessoes(); closeModal(); renderHistorico(); toast("Treino excluído"); };
 
 /* ===================== Cronômetro de descanso ===================== */
-let timerInt=null, timerRem=0, timerTotal=0;
-let audioCtx=null;
+let timerInt=null, timerRem=0, timerTotal=0, timerEnd=0;
+let alarming=false, alarmVibInt=null;
+let audioCtx=null, oscAlarm=null;            // Web Audio é só fallback agora
+let timerAudio=null, audioUrl=null, mediaReady=false;
+const ALARM_TAIL=120;   // segundos de apitos gravados após o tempo zerar
+
+/* ---- Áudio do descanso num ÚNICO elemento <audio> ----
+   A faixa é gerada na hora: SILÊNCIO (a duração do descanso) seguido dos
+   APITOS do alarme, tudo num só WAV. O elemento começa a tocar no seu toque
+   (gesto) e segue tocando sozinho; quando a reprodução chega na parte dos
+   apitos, o som sai — sem o JavaScript precisar fazer nada naquele momento.
+   É isso que faz o alarme soar com a tela bloqueada no iOS: não há um novo
+   play() no instante do alarme (que o iOS bloquearia em 2º plano), é a mesma
+   reprodução contínua entrando na parte sonora. Usamos Blob URL (não data URI)
+   p/ aguentar faixas de vários MB sem o custo do base64. */
+function wavBlobUrl(buf){ try{ return URL.createObjectURL(new Blob([buf], {type:"audio/wav"})); }catch(e){ return null; } }
+function buildTimerWav(silenceSecs, tailSecs){
+  const sr=8000;
+  const silN=Math.max(0, Math.floor(silenceSecs*sr));
+  const tailN=Math.max(0, Math.floor(tailSecs*sr));
+  const total=(silN+tailN)||sr;
+  const buf=new ArrayBuffer(44+total*2), dv=new DataView(buf);
+  const wr=(off,s)=>{ for(let i=0;i<s.length;i++) dv.setUint8(off+i, s.charCodeAt(i)); };
+  wr(0,"RIFF"); dv.setUint32(4,36+total*2,true); wr(8,"WAVE"); wr(12,"fmt ");
+  dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+  dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true);
+  wr(36,"data"); dv.setUint32(40,total*2,true);
+  const pcm=new Int16Array(buf, 44, total);
+  // silêncio: tom inaudível só p/ manter a sessão de áudio do iOS viva
+  for(let i=0;i<silN;i++) pcm[i]=Math.sin(2*Math.PI*60*i/sr)*0.0004*32767;
+  // alarme: apitos alternando 880/1320Hz (0,2s tom + 0,2s pausa)
+  const period=0.4, onDur=0.2;
+  for(let i=0;i<tailN;i++){
+    const t=i/sr, ph=t-Math.floor(t/period)*period; let v=0;
+    if(ph<onDur){
+      const beat=Math.floor(t/period), f=(beat%2===0)?880:1320;
+      const env=Math.min(1, (ph*sr)/80, ((onDur-ph)*sr)/80); // evita estalos
+      v=Math.sin(2*Math.PI*f*t)*0.5*env;
+    }
+    pcm[silN+i]=v*32767;
+  }
+  return buf;
+}
+function buildAudio(){
+  try{ timerAudio=new Audio(); timerAudio.loop=false; timerAudio.preload="auto"; }catch(e){}
+}
+buildAudio();
+
 function ensureAudio(){
   try{
     if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
@@ -749,35 +799,125 @@ function ensureAudio(){
   }catch(e){}
   return audioCtx;
 }
-// "Destrava" o áudio no iOS: na 1ª interação do usuário toca um som inaudível
+// "Destrava" o áudio no iOS na 1ª interação (Web Audio + um play curto)
 function unlockAudio(){
-  const ctx = ensureAudio(); if(!ctx) return;
-  try{
-    const o=ctx.createOscillator(), g=ctx.createGain();
-    g.gain.value=0.0001; o.connect(g); g.connect(ctx.destination);
-    o.start(); o.stop(ctx.currentTime+0.02);
-  }catch(e){}
+  ensureAudio();
+  if(!mediaReady && timerAudio){
+    try{
+      const u=wavBlobUrl(buildTimerWav(1,0));   // 1s de silêncio
+      if(u){
+        timerAudio.src=u; timerAudio.muted=true;
+        const p=timerAudio.play();
+        if(p&&p.then) p.then(()=>{ timerAudio.pause(); timerAudio.currentTime=0; timerAudio.muted=false; try{URL.revokeObjectURL(u);}catch(e){} }).catch(()=>{ timerAudio.muted=false; });
+        else timerAudio.muted=false;
+      }
+    }catch(e){ timerAudio.muted=false; }
+    mediaReady=true;
+  }
 }
 document.addEventListener("touchend", unlockAudio, {once:true});
 document.addEventListener("click", unlockAudio, {once:true});
 
-function beep(){
-  const ctx = ensureAudio(); if(!ctx) return;
+/* "Arma" o áudio do descanso: gera silêncio(secs)+apitos e já começa a tocar
+   (dentro do seu toque). É essa reprodução contínua que faz o alarme soar na
+   hora certa, mesmo com a tela bloqueada. */
+function armAudioTimer(secs){
+  if(!timerAudio) return;
   try{
-    // alarme: 6 apitos alternados em ~1,7s, volume alto (toca no fone também)
-    const seq=[0, 0.24, 0.48, 0.74, 1.04, 1.34];
-    seq.forEach((t0,i)=>{
-      const o=ctx.createOscillator(), g=ctx.createGain();
-      o.type="square";
-      o.frequency.value = (i%2===0) ? 880 : 1320;
-      o.connect(g); g.connect(ctx.destination);
-      const t=ctx.currentTime + t0;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.5, t+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t+0.20);
-      o.start(t); o.stop(t+0.22);
-    });
+    if(audioUrl){ try{URL.revokeObjectURL(audioUrl);}catch(e){} audioUrl=null; }
+    audioUrl=wavBlobUrl(buildTimerWav(Math.max(0,secs), ALARM_TAIL));
+    if(!audioUrl) return;
+    timerAudio.muted=false; timerAudio.volume=1; timerAudio.loop=false;
+    timerAudio.src=audioUrl; timerAudio.currentTime=0;
+    const p=timerAudio.play(); if(p&&p.catch) p.catch(()=>{});
   }catch(e){}
+}
+function stopAudioTimer(){
+  if(!timerAudio) return;
+  try{ timerAudio.pause(); timerAudio.currentTime=0; }catch(e){}
+  if(audioUrl){ try{URL.revokeObjectURL(audioUrl);}catch(e){} audioUrl=null; }
+}
+
+/* fallback de alarme via Web Audio (se o <audio> for bloqueado) */
+function startOscAlarm(){
+  const ctx=ensureAudio(); if(!ctx) return;
+  try{
+    const carrier=ctx.createOscillator(); carrier.type="square"; carrier.frequency.value=880;
+    const amp=ctx.createGain(); amp.gain.value=0.2;
+    const lfo=ctx.createOscillator(); lfo.type="square"; lfo.frequency.value=2.5;
+    const lfoGain=ctx.createGain(); lfoGain.gain.value=0.2;
+    lfo.connect(lfoGain); lfoGain.connect(amp.gain);
+    carrier.connect(amp); amp.connect(ctx.destination);
+    carrier.start(); lfo.start();
+    oscAlarm={carrier,lfo,amp,lfoGain};
+  }catch(e){}
+}
+function stopOscAlarm(){
+  if(!oscAlarm) return;
+  try{ oscAlarm.carrier.stop(); }catch(e){}
+  try{ oscAlarm.lfo.stop(); }catch(e){}
+  for(const k in oscAlarm){ try{ oscAlarm[k].disconnect(); }catch(e){} }
+  oscAlarm=null;
+}
+
+/* Chamado quando o tempo zera (com o app em primeiro plano). O SOM já está
+   tocando pelo próprio áudio armado; aqui só cuidamos da vibração e da UI. */
+function onAlarmReached(){
+  alarming=true;
+  if(alarmVibInt) clearInterval(alarmVibInt);
+  if(navigator.vibrate){
+    navigator.vibrate([200,100,200]);
+    alarmVibInt=setInterval(()=>{ if(navigator.vibrate) navigator.vibrate([200,100,200]); },1200);
+  }
+  // rede de segurança: se o áudio não estiver tocando, garante som via Web Audio
+  if(!timerAudio || timerAudio.paused || timerAudio.ended) startOscAlarm();
+  updateMediaSession();
+}
+function stopAlarm(){
+  if(alarmVibInt){ clearInterval(alarmVibInt); alarmVibInt=null; }
+  stopOscAlarm();
+  // só silencia/zera o áudio quando o alarme está tocando; durante a contagem
+  // o elemento segue tocando (o silêncio) mesmo com o modal fechado.
+  if(alarming){
+    alarming=false;
+    stopAudioTimer();
+    releaseWakeLock();
+    clearMediaSession();
+  }
+}
+
+/* ---- Media Session: mostra o descanso na tela de bloqueio ---- */
+function setupMediaSession(){
+  if(!("mediaSession" in navigator)) return;
+  try{
+    navigator.mediaSession.setActionHandler("stop", ()=>{ closeModal(); });
+    // se o usuário tocar em pausar na tela de bloqueio durante o alarme, silencia
+    navigator.mediaSession.setActionHandler("pause", ()=>{ if(alarming) closeModal(); });
+    navigator.mediaSession.setActionHandler("play", ()=>{}); // mantém a sessão viva
+  }catch(e){}
+}
+function updateMediaSession(){
+  if(!("mediaSession" in navigator)) return;
+  try{
+    const mm=Math.floor(timerRem/60), ss=String(timerRem%60).padStart(2,'0');
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: alarming ? "⏰ Descanso acabou!" : `Descanso ${mm}:${ss}`,
+      artist: sessaoAtiva ? sessaoAtiva.fichaNome : "Treinos",
+      album: "Cronômetro de descanso"
+    });
+    navigator.mediaSession.playbackState = "playing";
+    if(!alarming && timerTotal>0){
+      navigator.mediaSession.setPositionState({
+        duration: timerTotal,
+        position: Math.min(timerTotal, Math.max(0, timerTotal-timerRem)),
+        playbackRate: 1
+      });
+    }
+  }catch(e){}
+}
+function clearMediaSession(){
+  if(!("mediaSession" in navigator)) return;
+  try{ navigator.mediaSession.metadata=null; navigator.mediaSession.playbackState="none"; }catch(e){}
 }
 function renderTimerModal(){
   const m = Math.floor(timerRem/60), s = timerRem%60;
@@ -797,7 +937,7 @@ function renderTimerModal(){
       <button class="btn-ghost full" onclick="stopTimer(); renderTimerModal()">Zerar</button>
       <button class="btn full" onclick="closeModal()">Fechar</button>
     </div>
-    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔆 a tela fica ligada durante o descanso</p>`;
+    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔔 o alarme toca até você tocar em <b>Fechar</b> e tenta soar mesmo com a tela bloqueada</p>`;
 }
 window.abrirTimer = ()=>{
   $("#modalBg").classList.add("show");
@@ -819,25 +959,30 @@ async function releaseWakeLock(){
 }
 // se a tela voltar a ficar visível e o cronômetro ainda estiver rodando, reativa
 document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState==="visible" && timerInt && !wakeLock) requestWakeLock();
+  if(document.visibilityState==="visible" && (timerInt || alarming) && !wakeLock) requestWakeLock();
 });
 
 window.startTimer = (secs)=>{
   stopTimer();
-  timerTotal=secs; timerRem=secs;
+  timerTotal=secs; timerRem=secs; timerEnd=Date.now()+secs*1000;
   ensureAudio();
+  armAudioTimer(secs);   // áudio = silêncio(secs)+apitos; toca sozinho mesmo bloqueado
+  setupMediaSession();
   updateTimerDisplay();
+  updateMediaSession();
   requestWakeLock();
   timerInt = setInterval(()=>{
-    timerRem--;
+    // baseado no relógio: se o app foi congelado em 2º plano, recupera o tempo certo
+    timerRem = Math.max(0, Math.round((timerEnd-Date.now())/1000));
     updateTimerDisplay();
+    updateMediaSession();
     if(timerRem<=0){
-      stopTimer(); beep();
-      if(navigator.vibrate) navigator.vibrate([200,100,200]);
+      if(timerInt){ clearInterval(timerInt); timerInt=null; }
       const d=$("#timerDisp"); if(d){ d.textContent="0:00"; }
       toast("Descanso acabou! 🔔");
+      onAlarmReached();   // o som já vem do áudio; aqui só vibração + UI
     }
-  },1000);
+  },250);
 };
 function updateTimerDisplay(){
   const d=$("#timerDisp"); if(!d) return;
@@ -845,8 +990,22 @@ function updateTimerDisplay(){
   d.textContent=`${m}:${String(s).padStart(2,'0')}`;
   d.classList.toggle("warn", timerRem<=5 && timerRem>0);
 }
-window.addTimer = (s)=>{ timerRem+=s; if(!timerInt) startTimer(timerRem); else updateTimerDisplay(); };
-window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } releaseWakeLock(); };
+window.addTimer = (s)=>{
+  if(!timerInt){ startTimer(Math.max(0,(timerRem||0)+s)); return; }
+  timerEnd += s*1000; timerTotal += s;
+  timerRem = Math.max(0, Math.round((timerEnd-Date.now())/1000));
+  armAudioTimer((timerEnd-Date.now())/1000);   // regenera o áudio p/ o novo tempo
+  updateTimerDisplay(); updateMediaSession();
+};
+window.stopTimer = ()=>{
+  if(timerInt){ clearInterval(timerInt); timerInt=null; }
+  alarming=false;
+  if(alarmVibInt){ clearInterval(alarmVibInt); alarmVibInt=null; }
+  stopOscAlarm();
+  stopAudioTimer();
+  releaseWakeLock();
+  clearMediaSession();
+};
 $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 
 /* ===================== Config ===================== */
@@ -856,18 +1015,36 @@ $("#btnConfig").addEventListener("click", ()=>{
       <input type="number" inputmode="numeric" id="cfgDesc" value="${cfg.descanso}"></div>
     <button class="btn full" onclick="window._salvarCfg()">Salvar</button>
     <hr>
-    <p class="muted" style="font-size:12px; line-height:1.6">
+    <button class="btn-ghost full" onclick="window._forcarAtualizar()">🔄 Forçar atualização (limpar cache)</button>
+    <p class="muted" style="font-size:12px; line-height:1.6; margin-top:12px">
       Os dados ficam salvos só neste aparelho. Use <b>Backup completo</b> na aba Fichas de tempos em tempos.<br>
       Fichas: ${fichas.length} · Treinos: ${sessoes.length}<br>
-      <b>Versão ${APP_VERSION}</b>
+      <b>Versão ${APP_VERSION}</b> · ${esc(APP_BUILD)}
     </p>`);
 });
 window._salvarCfg = ()=>{
   const v = parseInt($("#cfgDesc").value)||90;
   cfg.descanso = Math.max(5, v); salvarCfg(); closeModal(); toast("Configuração salva ✓");
 };
+/* Limpa service worker + caches e recarrega buscando da rede. Útil p/ confirmar
+   que a versão nova realmente chegou (PWA no iOS costuma servir cache antigo). */
+window._forcarAtualizar = async ()=>{
+  toast("Atualizando…");
+  try{
+    if("serviceWorker" in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+    if(self.caches){ const keys = await caches.keys(); await Promise.all(keys.map(k=>caches.delete(k))); }
+  }catch(e){}
+  // cache-buster na URL p/ furar o cache de HTTP do navegador
+  const u = new URL(location.href);
+  u.searchParams.set("v", Date.now().toString(36));
+  location.replace(u.toString());
+};
 
 /* ===================== Init ===================== */
+{ const vb=$("#verBadge"); if(vb) vb.textContent = "v"+APP_VERSION; }
 go("treinar");
 
 /* registra service worker p/ funcionar offline (se disponível) */
