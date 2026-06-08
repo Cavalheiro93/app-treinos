@@ -741,7 +741,7 @@ window._delSess = (id)=>{ sessoes = sessoes.filter(s=>s.id!==id); salvarSessoes(
 
 /* ===================== Cronômetro de descanso ===================== */
 let timerInt=null, timerRem=0, timerTotal=0;
-let alarming=false, alarmOsc=null, alarmGain=null, alarmVibInt=null;
+let alarming=false, alarmNodes=null, alarmVibInt=null, keepAlive=null;
 let audioCtx=null;
 function ensureAudio(){
   try{
@@ -780,43 +780,60 @@ function beep(){
     });
   }catch(e){}
 }
+/* keep-alive: mantém o contexto de áudio "acordado" durante a contagem.
+   No iOS o contexto adormece em silêncio e perde a permissão de tocar fora
+   de um gesto do usuário; um oscilador inaudível rodando evita isso e
+   garante que o alarme consiga soar quando o tempo zerar. */
+function startKeepAlive(){
+  const ctx = ensureAudio(); if(!ctx) return;
+  stopKeepAlive();
+  try{
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    g.gain.value = 0.0001; o.connect(g); g.connect(ctx.destination);
+    o.start(); keepAlive = { o, g };
+  }catch(e){}
+}
+function stopKeepAlive(){
+  if(!keepAlive) return;
+  try{ keepAlive.o.stop(); }catch(e){}
+  try{ keepAlive.o.disconnect(); }catch(e){}
+  try{ keepAlive.g.disconnect(); }catch(e){}
+  keepAlive = null;
+}
 /* alarme contínuo até o usuário fechar o cronômetro.
-   Os apitos são agendados de uma vez no relógio do áudio (não dependem de
-   setInterval, que no iOS para de soar quando o contexto de áudio adormece). */
+   Um oscilador "tom" toca direto e um LFO quadrado liga/desliga o ganho
+   ~2,5x por segundo. São poucos nós e nada depende de setInterval, então o
+   som não para sozinho no iOS. */
 function startAlarm(){
   stopAlarm();
   alarming = true;
-  const ctx = ensureAudio();
-  // vibração não pode ser agendada à frente: mantém um interval só pra ela
   if(navigator.vibrate){
     navigator.vibrate([200,100,200]);
     alarmVibInt = setInterval(()=>{ if(navigator.vibrate) navigator.vibrate([200,100,200]); }, 1200);
   }
-  if(!ctx) return;
+  const ctx = ensureAudio(); if(!ctx) return;
   try{
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = "square"; o.connect(g); g.connect(ctx.destination);
-    const start = ctx.currentTime + 0.02;
-    const period = 0.32;                 // intervalo entre apitos
-    const N = Math.ceil(300 / period);   // agenda ~5 min de alarme à frente
-    g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    for(let i=0;i<N;i++){
-      const t = start + i*period;
-      o.frequency.setValueAtTime(i%2===0 ? 880 : 1320, t);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.5, t+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t+0.20);
-    }
-    o.start(start);
-    o.stop(start + N*period + 0.3);
-    alarmOsc = o; alarmGain = g;
+    const carrier = ctx.createOscillator();         // tom audível
+    carrier.type = "square"; carrier.frequency.value = 880;
+    const amp = ctx.createGain(); amp.gain.value = 0.2;   // offset do ganho
+    const lfo = ctx.createOscillator();             // liga/desliga o som
+    lfo.type = "square"; lfo.frequency.value = 2.5;
+    const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.2;
+    lfo.connect(lfoGain); lfoGain.connect(amp.gain); // ganho oscila ~0–0,4
+    carrier.connect(amp); amp.connect(ctx.destination);
+    carrier.start(); lfo.start();
+    alarmNodes = { carrier, lfo, amp, lfoGain };
   }catch(e){}
 }
 function stopAlarm(){
   if(alarmVibInt){ clearInterval(alarmVibInt); alarmVibInt=null; }
-  if(alarmOsc){ try{ alarmOsc.stop(); }catch(e){} try{ alarmOsc.disconnect(); }catch(e){} alarmOsc=null; }
-  if(alarmGain){ try{ alarmGain.disconnect(); }catch(e){} alarmGain=null; }
-  if(alarming){ alarming=false; releaseWakeLock(); }
+  if(alarmNodes){
+    try{ alarmNodes.carrier.stop(); }catch(e){}
+    try{ alarmNodes.lfo.stop(); }catch(e){}
+    for(const k in alarmNodes){ try{ alarmNodes[k].disconnect(); }catch(e){} }
+    alarmNodes = null;
+  }
+  if(alarming){ alarming = false; stopKeepAlive(); releaseWakeLock(); }
 }
 function renderTimerModal(){
   const m = Math.floor(timerRem/60), s = timerRem%60;
@@ -865,6 +882,7 @@ window.startTimer = (secs)=>{
   stopTimer();
   timerTotal=secs; timerRem=secs;
   ensureAudio();
+  startKeepAlive();   // mantém o áudio vivo até o tempo zerar (essencial no iOS)
   updateTimerDisplay();
   requestWakeLock();
   timerInt = setInterval(()=>{
@@ -886,7 +904,7 @@ function updateTimerDisplay(){
   d.classList.toggle("warn", timerRem<=5 && timerRem>0);
 }
 window.addTimer = (s)=>{ timerRem+=s; if(!timerInt) startTimer(timerRem); else updateTimerDisplay(); };
-window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } stopAlarm(); releaseWakeLock(); };
+window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } stopAlarm(); stopKeepAlive(); releaseWakeLock(); };
 $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 
 /* ===================== Config ===================== */
