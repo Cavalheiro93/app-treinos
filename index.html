@@ -172,7 +172,10 @@
     <h1 id="topTitle">Treinar</h1>
     <div class="sub" id="topSub">Bora pra cima 💪</div>
   </div>
-  <button class="btn-ghost btn-sm" id="btnConfig">⚙️</button>
+  <div class="row" style="gap:8px">
+    <span class="pill" id="verBadge" onclick="window._forcarAtualizar&&window._forcarAtualizar()" title="Toque para forçar atualização">v…</span>
+    <button class="btn-ghost btn-sm" id="btnConfig">⚙️</button>
+  </div>
 </div>
 
 <main>
@@ -220,7 +223,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "1.5 (alarme gravado: toca bloqueado)";
+const APP_VERSION = "1.6";
+const APP_BUILD = "2026-06-08 · alarme gravado";
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
 const KEY_CFG    = "gym_config_v1";
@@ -1011,18 +1015,36 @@ $("#btnConfig").addEventListener("click", ()=>{
       <input type="number" inputmode="numeric" id="cfgDesc" value="${cfg.descanso}"></div>
     <button class="btn full" onclick="window._salvarCfg()">Salvar</button>
     <hr>
-    <p class="muted" style="font-size:12px; line-height:1.6">
+    <button class="btn-ghost full" onclick="window._forcarAtualizar()">🔄 Forçar atualização (limpar cache)</button>
+    <p class="muted" style="font-size:12px; line-height:1.6; margin-top:12px">
       Os dados ficam salvos só neste aparelho. Use <b>Backup completo</b> na aba Fichas de tempos em tempos.<br>
       Fichas: ${fichas.length} · Treinos: ${sessoes.length}<br>
-      <b>Versão ${APP_VERSION}</b>
+      <b>Versão ${APP_VERSION}</b> · ${esc(APP_BUILD)}
     </p>`);
 });
 window._salvarCfg = ()=>{
   const v = parseInt($("#cfgDesc").value)||90;
   cfg.descanso = Math.max(5, v); salvarCfg(); closeModal(); toast("Configuração salva ✓");
 };
+/* Limpa service worker + caches e recarrega buscando da rede. Útil p/ confirmar
+   que a versão nova realmente chegou (PWA no iOS costuma servir cache antigo). */
+window._forcarAtualizar = async ()=>{
+  toast("Atualizando…");
+  try{
+    if("serviceWorker" in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+    if(self.caches){ const keys = await caches.keys(); await Promise.all(keys.map(k=>caches.delete(k))); }
+  }catch(e){}
+  // cache-buster na URL p/ furar o cache de HTTP do navegador
+  const u = new URL(location.href);
+  u.searchParams.set("v", Date.now().toString(36));
+  location.replace(u.toString());
+};
 
 /* ===================== Init ===================== */
+{ const vb=$("#verBadge"); if(vb) vb.textContent = "v"+APP_VERSION; }
 go("treinar");
 
 /* registra service worker p/ funcionar offline (se disponível) */
