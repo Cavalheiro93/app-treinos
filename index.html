@@ -743,12 +743,15 @@ window._delSess = (id)=>{ sessoes = sessoes.filter(s=>s.id!==id); salvarSessoes(
 let timerInt=null, timerRem=0, timerTotal=0;
 let alarming=false, alarmVibInt=null;
 let audioCtx=null, oscAlarm=null;            // Web Audio é só fallback agora
-let silentEl=null, alarmEl=null, mediaReady=false;
+let timerAudio=null, silentUri="", alarmUri="", mediaReady=false;
 
-/* ---- Áudio via elemento <audio> (data URI WAV) ----
+/* ---- Áudio via UM único elemento <audio> que troca a faixa (data URI WAV) ----
    Um <audio> em loop mantém a "sessão de áudio" do iOS ativa, permitindo que
    o som continue com a tela bloqueada / app em segundo plano — algo que a
-   Web Audio API sozinha não consegue no iPhone. */
+   Web Audio API sozinha não consegue no iPhone. Usamos um só elemento:
+   ele é "abençoado" por um toque seu ao iniciar o descanso (tocando a faixa
+   silenciosa) e depois apenas troca de faixa para o alarme — assim o iOS não
+   volta a bloquear o áudio quando o tempo zera. */
 function wavDataUri(samples, sr){
   const n=samples.length, buf=new ArrayBuffer(44+n*2), dv=new DataView(buf);
   const wr=(off,s)=>{ for(let i=0;i<s.length;i++) dv.setUint8(off+i, s.charCodeAt(i)); };
@@ -760,7 +763,7 @@ function wavDataUri(samples, sr){
   const bytes=new Uint8Array(buf); let bin=""; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
   return "data:audio/wav;base64,"+btoa(bin);
 }
-function buildAudioEls(){
+function buildAudio(){
   try{
     const sr=8000;
     // faixa "silenciosa" (amplitude minúscula) só p/ segurar a sessão de áudio
@@ -775,11 +778,12 @@ function buildAudioEls(){
         al[ini+i]=Math.sin(2*Math.PI*f*i/sr)*0.5*env;
       }
     }
-    silentEl=new Audio(wavDataUri(silent,sr)); silentEl.loop=true; silentEl.preload="auto";
-    alarmEl =new Audio(wavDataUri(al,sr));      alarmEl.loop=true;  alarmEl.preload="auto";
+    silentUri=wavDataUri(silent,sr);
+    alarmUri =wavDataUri(al,sr);
+    timerAudio=new Audio(); timerAudio.loop=true; timerAudio.preload="auto";
   }catch(e){}
 }
-buildAudioEls();
+buildAudio();
 
 function ensureAudio(){
   try{
@@ -788,19 +792,16 @@ function ensureAudio(){
   }catch(e){}
   return audioCtx;
 }
-// "Destrava" o áudio no iOS na 1ª interação: Web Audio + elementos <audio>
+// "Destrava" o áudio no iOS na 1ª interação: Web Audio + o elemento <audio>
 function unlockAudio(){
   ensureAudio();
-  if(!mediaReady){
-    [silentEl,alarmEl].forEach(a=>{
-      if(!a) return;
-      try{
-        a.muted=true;
-        const p=a.play();
-        if(p&&p.then) p.then(()=>{ a.pause(); a.currentTime=0; a.muted=false; }).catch(()=>{ a.muted=false; });
-        else a.muted=false;
-      }catch(e){ a.muted=false; }
-    });
+  if(!mediaReady && timerAudio){
+    try{
+      timerAudio.src=silentUri; timerAudio.muted=true;
+      const p=timerAudio.play();
+      if(p&&p.then) p.then(()=>{ timerAudio.pause(); timerAudio.currentTime=0; timerAudio.muted=false; }).catch(()=>{ timerAudio.muted=false; });
+      else timerAudio.muted=false;
+    }catch(e){ timerAudio.muted=false; }
     mediaReady=true;
   }
 }
@@ -810,12 +811,16 @@ document.addEventListener("click", unlockAudio, {once:true});
 /* keep-alive: toca a faixa silenciosa em loop p/ manter a sessão de áudio do
    iOS ativa durante a contagem (assim o alarme soa mesmo com a tela bloqueada). */
 function startKeepAlive(){
-  if(!silentEl) return;
-  try{ silentEl.currentTime=0; const p=silentEl.play(); if(p&&p.catch) p.catch(()=>{}); }catch(e){}
+  if(!timerAudio) return;
+  try{
+    timerAudio.muted=false; timerAudio.volume=1;
+    timerAudio.src=silentUri; timerAudio.loop=true;
+    const p=timerAudio.play(); if(p&&p.catch) p.catch(()=>{});
+  }catch(e){}
 }
 function stopKeepAlive(){
-  if(!silentEl) return;
-  try{ silentEl.pause(); silentEl.currentTime=0; }catch(e){}
+  if(!timerAudio) return;
+  try{ timerAudio.pause(); }catch(e){}
 }
 
 /* fallback de alarme via Web Audio (se o <audio> for bloqueado) */
@@ -840,20 +845,24 @@ function stopOscAlarm(){
   oscAlarm=null;
 }
 
-/* alarme contínuo até o usuário fechar o cronômetro */
+/* alarme contínuo até o usuário fechar o cronômetro.
+   Troca a faixa do MESMO elemento (que já vinha tocando o silêncio) para o
+   alarme — sem pausar antes, p/ não perder a sessão de áudio no iOS. */
 function startAlarm(){
-  stopAlarm();
   alarming=true;
+  if(alarmVibInt) clearInterval(alarmVibInt);
   if(navigator.vibrate){
     navigator.vibrate([200,100,200]);
     alarmVibInt=setInterval(()=>{ if(navigator.vibrate) navigator.vibrate([200,100,200]); },1200);
   }
   let ok=false;
-  if(alarmEl){
+  if(timerAudio){
     try{
-      alarmEl.muted=false; alarmEl.volume=1; alarmEl.currentTime=0;
-      const p=alarmEl.play();
+      timerAudio.muted=false; timerAudio.volume=1;
+      timerAudio.src=alarmUri; timerAudio.loop=true; timerAudio.currentTime=0;
+      const p=timerAudio.play();
       if(p&&p.then){ ok=true; p.catch(()=>{ startOscAlarm(); }); }
+      else ok=true;
     }catch(e){}
   }
   if(!ok) startOscAlarm();   // sem <audio>/Promise -> garante som via Web Audio
@@ -861,9 +870,15 @@ function startAlarm(){
 }
 function stopAlarm(){
   if(alarmVibInt){ clearInterval(alarmVibInt); alarmVibInt=null; }
-  if(alarmEl){ try{ alarmEl.pause(); alarmEl.currentTime=0; }catch(e){} }
   stopOscAlarm();
-  if(alarming){ alarming=false; stopKeepAlive(); releaseWakeLock(); clearMediaSession(); }
+  // só pausa o áudio quando o alarme está tocando; durante a contagem o
+  // elemento segue tocando o silêncio mesmo com o modal fechado.
+  if(alarming){
+    alarming=false;
+    if(timerAudio){ try{ timerAudio.pause(); }catch(e){} }
+    releaseWakeLock();
+    clearMediaSession();
+  }
 }
 
 /* ---- Media Session: mostra o descanso na tela de bloqueio ---- */
