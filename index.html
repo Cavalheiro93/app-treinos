@@ -83,13 +83,17 @@
   .ex-head b{flex:1; font-size:15px}
   .ex-head .target{color:var(--muted); font-size:12px; font-weight:600}
   .ex-sets{padding:0 14px 14px}
-  .set-row{display:grid; grid-template-columns:34px 1fr 1fr 44px; gap:8px; align-items:center; margin-bottom:8px}
-  .set-row .n{color:var(--muted); font-weight:700; text-align:center; font-size:13px}
+  .set-row{display:grid; grid-template-columns:64px 1fr 1fr 44px; gap:8px; align-items:center; margin-bottom:8px}
   .set-row input{padding:10px; text-align:center}
   .set-row .chk{width:40px; height:40px; border-radius:10px; background:var(--card2); border:1px solid var(--line);
     display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--muted)}
   .set-row .chk.on{background:var(--ok); color:#04210f; border-color:var(--ok)}
-  .set-head{display:grid; grid-template-columns:34px 1fr 1fr 44px; gap:8px; margin-bottom:6px}
+  .set-tag{height:40px; border-radius:10px; background:var(--card2); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:var(--muted);
+    cursor:pointer; user-select:none; text-align:center; line-height:1.05}
+  .set-tag.aquec{background:rgba(255,176,32,.16); border-color:var(--warn); color:var(--warn); font-size:10px; letter-spacing:.02em}
+  .set-tag.prep{background:rgba(79,140,255,.16); border-color:var(--accent); color:var(--accent); font-size:10px; letter-spacing:.02em}
+  .set-head{display:grid; grid-template-columns:64px 1fr 1fr 44px; gap:8px; margin-bottom:6px}
   .set-head span{font-size:11px; color:var(--muted); text-align:center; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
 
   /* tabbar */
@@ -326,7 +330,7 @@ window.iniciarTreino = function(fichaId){
       const sugCarga = ultimaCargaExercicio(ex.nome) || ex.carga || "";
       return {
         nome:ex.nome, series:ex.series, reps:ex.reps, carga:ex.carga,
-        sets: Array.from({length:nSeries}, ()=>({carga:sugCarga, reps:ex.reps||"", feito:false}))
+        sets: Array.from({length:nSeries}, ()=>({carga:sugCarga, reps:ex.reps||"", feito:false, tag:""}))
       };
     })
   };
@@ -336,9 +340,14 @@ window.iniciarTreino = function(fichaId){
 
 function renderSessaoAtiva(v){
   const s = sessaoAtiva;
-  let html = `<div class="card row">
-    <div style="flex:1"><h2 style="margin:0">${esc(s.fichaNome)}</h2>
-      <div class="muted">${fmtData(s.data)} · treino em andamento</div></div>
+  let html = `<div class="card">
+    <h2 style="margin:0">${esc(s.fichaNome)}</h2>
+    <div class="muted">${fmtData(s.data)} · treino em andamento</div>
+    <div class="muted" style="margin-top:8px; font-size:12px; line-height:1.4">
+      Toque no <b>número da série</b> para marcar
+      <span style="color:var(--warn)">🔥 Aquecimento</span> ou
+      <span style="color:var(--accent)">⚡ Preparação</span>.
+    </div>
   </div>`;
 
   s.itens.forEach((it, ei)=>{
@@ -349,10 +358,14 @@ function renderSessaoAtiva(v){
         <span class="target">meta: ${esc(it.series||'-')}×${esc(it.reps||'-')}${it.carga?` · ${esc(it.carga)}`:''}</span>
       </div>
       <div class="ex-sets">
-        <div class="set-head"><span>Set</span><span>Carga (kg)</span><span>Reps</span><span>✓</span></div>`;
+        <div class="set-head"><span>Série</span><span>Carga (kg)</span><span>Reps</span><span>✓</span></div>`;
     it.sets.forEach((set, si)=>{
+      const ti = tagInfo(set.tag);
+      const chip = ti
+        ? `<div class="set-tag ${ti.cls}" onclick="cycleTag(${ei},${si})" title="Toque para mudar">${ti.emoji}<br>${ti.label}</div>`
+        : `<div class="set-tag" onclick="cycleTag(${ei},${si})" title="Toque para marcar aquecimento/preparação">${si+1}</div>`;
       html += `<div class="set-row">
-        <div class="n">${si+1}</div>
+        ${chip}
         <input type="number" inputmode="decimal" placeholder="—" value="${esc(set.carga)}" oninput="setVal(${ei},${si},'carga',this.value)">
         <input type="number" inputmode="numeric" placeholder="${esc(it.reps||'—')}" value="${esc(set.reps)}" oninput="setVal(${ei},${si},'reps',this.value)">
         <div class="chk ${set.feito?'on':''}" onclick="toggleSet(${ei},${si})">${set.feito?'✓':''}</div>
@@ -373,6 +386,21 @@ function renderSessaoAtiva(v){
   v.innerHTML = html;
 }
 
+/* tags de série: '' (normal) -> aquecimento -> preparacao -> '' */
+const TAGS = ["", "aquecimento", "preparacao"];
+function tagInfo(tag){
+  if(tag==="aquecimento") return { label:"AQUEC", emoji:"🔥", cls:"aquec" };
+  if(tag==="preparacao")  return { label:"PREP",  emoji:"⚡", cls:"prep"  };
+  return null;
+}
+window.cycleTag = (ei,si)=>{
+  const set = sessaoAtiva.itens[ei].sets[si];
+  const i = TAGS.indexOf(set.tag||"");
+  set.tag = TAGS[(i+1)%TAGS.length];
+  if(navigator.vibrate) navigator.vibrate(10);
+  renderTreinar();
+};
+
 window.setVal = (ei,si,campo,val)=>{ sessaoAtiva.itens[ei].sets[si][campo]=val; };
 window.toggleSet = (ei,si)=>{
   const set = sessaoAtiva.itens[ei].sets[si];
@@ -384,7 +412,7 @@ window.toggleSet = (ei,si)=>{
 window.addSet = (ei)=>{
   const it = sessaoAtiva.itens[ei];
   const last = it.sets[it.sets.length-1] || {carga:"",reps:it.reps||""};
-  it.sets.push({carga:last.carga, reps:last.reps, feito:false});
+  it.sets.push({carga:last.carga, reps:last.reps, feito:false, tag:""});
   renderTreinar();
 };
 window.cancelarTreino = ()=>{
@@ -634,7 +662,7 @@ function renderHistorico(){
       <details><summary>${s.itens.length} exercícios · ${totalSets} séries</summary>
         <ul>${s.itens.map(it=>{
           const melhor = it.sets.reduce((m,x)=> (parseFloat(x.carga)||0)>m ? (parseFloat(x.carga)||0):m, 0);
-          const det = it.sets.map(x=>`${x.carga||'–'}×${x.reps||'–'}`).join("  ·  ");
+          const det = it.sets.map(x=>{ const ti=tagInfo(x.tag); return `${ti?ti.emoji+' ':''}${x.carga||'–'}×${x.reps||'–'}`; }).join("  ·  ");
           return `<li><b style="color:var(--txt)">${esc(it.nome)}</b> — ${det}${melhor?` <span style="color:var(--ok)">(top ${melhor}kg)</span>`:''}</li>`;
         }).join("")}</ul>
       </details>
@@ -691,16 +719,40 @@ window._delSess = (id)=>{ sessoes = sessoes.filter(s=>s.id!==id); salvarSessoes(
 /* ===================== Cronômetro de descanso ===================== */
 let timerInt=null, timerRem=0, timerTotal=0;
 let audioCtx=null;
-function beep(){
+function ensureAudio(){
   try{
-    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
-    [0,150,300].forEach((delay,i)=>{
-      const o=audioCtx.createOscillator(), g=audioCtx.createGain();
-      o.frequency.value = i<2?880:1175; o.connect(g); g.connect(audioCtx.destination);
-      const t=audioCtx.currentTime + delay/1000;
-      g.gain.setValueAtTime(0.001,t); g.gain.exponentialRampToValueAtTime(0.3,t+0.02);
-      g.gain.exponentialRampToValueAtTime(0.001,t+0.18);
-      o.start(t); o.stop(t+0.2);
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==="suspended") audioCtx.resume();
+  }catch(e){}
+  return audioCtx;
+}
+// "Destrava" o áudio no iOS: na 1ª interação do usuário toca um som inaudível
+function unlockAudio(){
+  const ctx = ensureAudio(); if(!ctx) return;
+  try{
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    g.gain.value=0.0001; o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime+0.02);
+  }catch(e){}
+}
+document.addEventListener("touchend", unlockAudio, {once:true});
+document.addEventListener("click", unlockAudio, {once:true});
+
+function beep(){
+  const ctx = ensureAudio(); if(!ctx) return;
+  try{
+    // alarme: 6 apitos alternados em ~1,7s, volume alto (toca no fone também)
+    const seq=[0, 0.24, 0.48, 0.74, 1.04, 1.34];
+    seq.forEach((t0,i)=>{
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.type="square";
+      o.frequency.value = (i%2===0) ? 880 : 1320;
+      o.connect(g); g.connect(ctx.destination);
+      const t=ctx.currentTime + t0;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+0.20);
+      o.start(t); o.stop(t+0.22);
     });
   }catch(e){}
 }
@@ -732,7 +784,7 @@ window.abrirTimer = ()=>{
 window.startTimer = (secs)=>{
   stopTimer();
   timerTotal=secs; timerRem=secs;
-  if(audioCtx==null){ try{ audioCtx=new(window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  ensureAudio();
   updateTimerDisplay();
   timerInt = setInterval(()=>{
     timerRem--;

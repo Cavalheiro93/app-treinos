@@ -1,5 +1,5 @@
 // Service worker simples: cache offline do app
-const CACHE = "treinos-v1";
+const CACHE = "treinos-v2";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon.png"];
 
 self.addEventListener("install", e => {
