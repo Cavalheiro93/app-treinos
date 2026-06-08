@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0f1115">
+<!-- iOS: permite adicionar à tela inicial e abrir em tela cheia -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Treinos">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<title>Meus Treinos</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#1a1d24; --card2:#232733; --line:#2c3140;
+    --txt:#e8eaf0; --muted:#9aa3b2; --accent:#4f8cff; --accent2:#3a6fd8;
+    --ok:#39d98a; --warn:#ffb020; --danger:#ff5c5c; --radius:16px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0; padding:0}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding-bottom:calc(78px + env(safe-area-inset-bottom));
+    -webkit-font-smoothing:antialiased;
+  }
+  .topbar{
+    position:sticky; top:0; z-index:20; background:rgba(15,17,21,.9);
+    backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
+    padding:calc(env(safe-area-inset-top) + 12px) 16px 12px; display:flex;
+    align-items:center; justify-content:space-between;
+  }
+  .topbar h1{font-size:18px; margin:0; font-weight:700}
+  .topbar .sub{font-size:12px; color:var(--muted); font-weight:500}
+  main{padding:16px; max-width:680px; margin:0 auto}
+  .view{display:none}
+  .view.active{display:block; animation:fade .2s ease}
+  @keyframes fade{from{opacity:0; transform:translateY(4px)}to{opacity:1; transform:none}}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:14px}
+  .card h2{margin:0 0 4px; font-size:16px}
+  .card .muted{color:var(--muted); font-size:13px}
+  .row{display:flex; gap:10px; align-items:center}
+  .row.wrap{flex-wrap:wrap}
+  .spacer{flex:1}
+
+  button{font-family:inherit; cursor:pointer; border:none; border-radius:12px; font-weight:600; font-size:15px; padding:12px 16px; transition:transform .05s, background .15s}
+  button:active{transform:scale(.97)}
+  .btn{background:var(--accent); color:#fff}
+  .btn.full{width:100%}
+  .btn-ghost{background:var(--card2); color:var(--txt); border:1px solid var(--line)}
+  .btn-sm{padding:8px 12px; font-size:13px; border-radius:10px}
+  .btn-danger{background:transparent; color:var(--danger); border:1px solid var(--line)}
+  .btn-ok{background:var(--ok); color:#04210f}
+
+  input,select{
+    font-family:inherit; font-size:16px; background:var(--card2); color:var(--txt);
+    border:1px solid var(--line); border-radius:10px; padding:11px 12px; width:100%;
+  }
+  input:focus,select:focus{outline:none; border-color:var(--accent)}
+  label{font-size:12px; color:var(--muted); display:block; margin:0 0 5px; font-weight:600}
+  .field{margin-bottom:12px}
+
+  .pill{display:inline-block; background:var(--card2); border:1px solid var(--line); color:var(--muted);
+    padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600}
+
+  .ficha-item{display:flex; align-items:center; gap:12px; padding:14px; background:var(--card);
+    border:1px solid var(--line); border-radius:var(--radius); margin-bottom:10px; cursor:pointer}
+  .ficha-item:active{background:var(--card2)}
+  .ficha-badge{width:44px; height:44px; flex:none; border-radius:12px; background:linear-gradient(135deg,var(--accent),var(--accent2));
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px; color:#fff}
+  .ficha-item .info{flex:1; min-width:0}
+  .ficha-item .info b{display:block; font-size:15px}
+  .ficha-item .info span{color:var(--muted); font-size:13px}
+  .chev{color:var(--muted); font-size:20px}
+
+  /* exercício na tela de treino */
+  .ex{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); margin-bottom:12px; overflow:hidden}
+  .ex.done{border-color:var(--ok)}
+  .ex-head{display:flex; align-items:center; gap:10px; padding:14px}
+  .ex-head b{flex:1; font-size:15px}
+  .ex-head .target{color:var(--muted); font-size:12px; font-weight:600}
+  .ex-sets{padding:0 14px 14px}
+  .set-row{display:grid; grid-template-columns:34px 1fr 1fr 44px; gap:8px; align-items:center; margin-bottom:8px}
+  .set-row .n{color:var(--muted); font-weight:700; text-align:center; font-size:13px}
+  .set-row input{padding:10px; text-align:center}
+  .set-row .chk{width:40px; height:40px; border-radius:10px; background:var(--card2); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--muted)}
+  .set-row .chk.on{background:var(--ok); color:#04210f; border-color:var(--ok)}
+  .set-head{display:grid; grid-template-columns:34px 1fr 1fr 44px; gap:8px; margin-bottom:6px}
+  .set-head span{font-size:11px; color:var(--muted); text-align:center; font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+
+  /* tabbar */
+  .tabbar{position:fixed; bottom:0; left:0; right:0; z-index:30; display:flex;
+    background:rgba(20,23,30,.92); backdrop-filter:blur(12px); border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom)}
+  .tab{flex:1; background:none; border:none; color:var(--muted); padding:10px 0 12px; display:flex;
+    flex-direction:column; align-items:center; gap:3px; font-size:11px; font-weight:600}
+  .tab.active{color:var(--accent)}
+  .tab svg{width:24px; height:24px}
+
+  .empty{text-align:center; color:var(--muted); padding:40px 20px}
+  .empty .big{font-size:40px; margin-bottom:8px}
+
+  /* modal */
+  .modal-bg{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; display:none; align-items:flex-end; justify-content:center}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--card); border-top-left-radius:22px; border-top-right-radius:22px; width:100%;
+    max-width:680px; max-height:90vh; overflow-y:auto; padding:18px 16px calc(20px + env(safe-area-inset-bottom)); animation:slideup .25s ease}
+  @keyframes slideup{from{transform:translateY(100%)}to{transform:none}}
+  .modal h2{margin:0 0 14px; font-size:18px}
+  .modal .grabber{width:40px; height:4px; background:var(--line); border-radius:99px; margin:0 auto 14px}
+
+  /* timer */
+  .timer-display{font-size:64px; font-weight:800; text-align:center; font-variant-numeric:tabular-nums; margin:10px 0; letter-spacing:-2px}
+  .timer-display.warn{color:var(--warn)}
+  .timer-presets{display:flex; gap:8px; justify-content:center; margin-bottom:14px; flex-wrap:wrap}
+  .timer-presets button{padding:9px 14px}
+
+  .fab-timer{position:fixed; right:16px; bottom:calc(86px + env(safe-area-inset-bottom)); z-index:25;
+    width:56px; height:56px; border-radius:50%; background:var(--accent); color:#fff; box-shadow:0 6px 18px rgba(79,140,255,.4);
+    display:none; align-items:center; justify-content:center; font-size:24px}
+  .fab-timer.show{display:flex}
+
+  .ex-edit-row{display:grid; grid-template-columns:1fr 56px 56px 64px 34px; gap:6px; align-items:center; margin-bottom:8px}
+  .ex-edit-row input{padding:9px 6px; font-size:14px; text-align:center}
+  .ex-edit-row input.nome{text-align:left}
+  .ex-edit-row .del{background:none; border:none; color:var(--danger); font-size:20px; padding:0}
+  .edit-head{display:grid; grid-template-columns:1fr 56px 56px 64px 34px; gap:6px; margin-bottom:5px}
+  .edit-head span{font-size:10px; color:var(--muted); text-align:center; font-weight:700; text-transform:uppercase}
+
+  .sess-item{padding:14px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); margin-bottom:10px}
+  .sess-item .top{display:flex; align-items:center; gap:10px; margin-bottom:6px}
+  .sess-item .data{font-weight:700; font-size:15px}
+  .sess-item ul{margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:13px}
+  .sess-item li{margin-bottom:2px}
+
+  .toast{position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+    background:var(--card2); border:1px solid var(--line); color:var(--txt); padding:11px 18px; border-radius:12px;
+    font-size:14px; font-weight:600; z-index:99; opacity:0; transition:opacity .2s, transform .2s; pointer-events:none}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(-4px)}
+
+  /* mini gráfico */
+  .chart{width:100%; height:130px; margin-top:8px}
+  .chart-dot{fill:var(--accent)}
+  details summary{cursor:pointer; font-weight:600; font-size:14px; padding:6px 0; list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary:before{content:"▸"; color:var(--muted); margin-right:8px; display:inline-block; transition:transform .15s}
+  details[open] summary:before{transform:rotate(90deg)}
+
+  hr{border:none; border-top:1px solid var(--line); margin:16px 0}
+  a{color:var(--accent)}
+  code{background:var(--card2); padding:2px 6px; border-radius:6px; font-size:13px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1 id="topTitle">Treinar</h1>
+    <div class="sub" id="topSub">Bora pra cima 💪</div>
+  </div>
+  <button class="btn-ghost btn-sm" id="btnConfig">⚙️</button>
+</div>
+
+<main>
+  <!-- ============ TREINAR ============ -->
+  <section class="view active" id="view-treinar"></section>
+
+  <!-- ============ FICHAS ============ -->
+  <section class="view" id="view-fichas"></section>
+
+  <!-- ============ HISTÓRICO ============ -->
+  <section class="view" id="view-historico"></section>
+</main>
+
+<!-- FAB cronômetro -->
+<button class="fab-timer" id="fabTimer">⏱️</button>
+
+<!-- Tabbar -->
+<nav class="tabbar">
+  <button class="tab active" data-tab="treinar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6.5 6.5l11 11M3 12l-1 1 2 2 1-1M21 12l1-1-2-2-1 1M7 8l1-1m9 9l1-1M5 10l9 9 2-2-9-9z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Treinar
+  </button>
+  <button class="tab" data-tab="fichas">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5" stroke-linecap="round"/></svg>
+    Fichas
+  </button>
+  <button class="tab" data-tab="historico">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18" stroke-linecap="round"/><path d="M7 14l4-4 3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Histórico
+  </button>
+</nav>
+
+<!-- Modal genérico -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ===================== Armazenamento ===================== */
+const DB = {
+  get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
+  set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
+};
+const KEY_FICHAS = "gym_fichas_v1";
+const KEY_SESS   = "gym_sessoes_v1";
+const KEY_CFG    = "gym_config_v1";
+
+let fichas  = DB.get(KEY_FICHAS, []);
+let sessoes = DB.get(KEY_SESS, []);
+let cfg     = DB.get(KEY_CFG, { descanso:90 });
+
+function salvarFichas(){ DB.set(KEY_FICHAS, fichas) }
+function salvarSessoes(){ DB.set(KEY_SESS, sessoes) }
+function salvarCfg(){ DB.set(KEY_CFG, cfg) }
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7) }
+
+/* estado da sessão de treino em andamento */
+let sessaoAtiva = null; // {fichaId, fichaNome, itens:[{nome, series, reps, carga, sets:[{carga,reps,feito}]}]}
+
+/* ===================== Utilidades UI ===================== */
+const $ = sel => document.querySelector(sel);
+const el = (tag, attrs={}, html="") => { const e=document.createElement(tag); for(const k in attrs) e.setAttribute(k, attrs[k]); if(html) e.innerHTML=html; return e; };
+function esc(s){ return String(s??"").replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+
+let toastTimer;
+function toast(msg){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>t.classList.remove("show"), 2200);
+}
+
+function openModal(html){
+  $("#modalContent").innerHTML = '<div class="grabber"></div>' + html;
+  $("#modalBg").classList.add("show");
+}
+function closeModal(){ $("#modalBg").classList.remove("show"); }
+$("#modalBg").addEventListener("click", e=>{ if(e.target.id==="modalBg") closeModal(); });
+
+function fmtData(iso){
+  const d = new Date(iso);
+  const dias=["dom","seg","ter","qua","qui","sex","sáb"];
+  return `${dias[d.getDay()]}, ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+}
+
+/* ===================== Navegação ===================== */
+const titles = {
+  treinar:["Treinar","Bora pra cima 💪"],
+  fichas:["Fichas","Seus treinos montados"],
+  historico:["Histórico","Sua evolução"],
+};
+function go(tab){
+  document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+  $("#view-"+tab).classList.add("active");
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===tab));
+  $("#topTitle").textContent = titles[tab][0];
+  $("#topSub").textContent = titles[tab][1];
+  $("#fabTimer").classList.toggle("show", tab==="treinar" && !!sessaoAtiva);
+  if(tab==="treinar") renderTreinar();
+  if(tab==="fichas") renderFichas();
+  if(tab==="historico") renderHistorico();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll(".tab").forEach(b=> b.addEventListener("click", ()=>go(b.dataset.tab)));
+
+/* ===================== Aba TREINAR ===================== */
+function renderTreinar(){
+  const v = $("#view-treinar");
+  if(sessaoAtiva){ renderSessaoAtiva(v); return; }
+
+  if(fichas.length===0){
+    v.innerHTML = `<div class="empty">
+      <div class="big">🏋️</div>
+      <b>Nenhuma ficha ainda</b><br>
+      <span>Crie ou importe um treino na aba <b>Fichas</b> para começar.</span><br><br>
+      <button class="btn" onclick="go('fichas')">Ir para Fichas</button>
+    </div>`;
+    return;
+  }
+
+  let html = `<div class="card"><h2>Escolha o treino de hoje</h2>
+    <div class="muted">Toque numa ficha para iniciar o registro.</div></div>`;
+  fichas.forEach(f=>{
+    const ult = ultimaSessaoDaFicha(f.id);
+    html += `<div class="ficha-item" onclick="iniciarTreino('${f.id}')">
+      <div class="ficha-badge">${esc((f.nome||'?').trim().charAt(0).toUpperCase())}</div>
+      <div class="info">
+        <b>${esc(f.nome)}</b>
+        <span>${f.exercicios.length} exercícios${ult?` · último: ${fmtData(ult.data)}`:''}</span>
+      </div>
+      <div class="chev">▶</div>
+    </div>`;
+  });
+  v.innerHTML = html;
+}
+
+function ultimaSessaoDaFicha(fichaId){
+  const lista = sessoes.filter(s=>s.fichaId===fichaId).sort((a,b)=> b.data.localeCompare(a.data));
+  return lista[0]||null;
+}
+function ultimaCargaExercicio(nomeEx){
+  // procura nas sessões mais recentes a última carga registrada desse exercício
+  const ord = [...sessoes].sort((a,b)=> b.data.localeCompare(a.data));
+  for(const s of ord){
+    const it = s.itens.find(i=>i.nome.toLowerCase()===nomeEx.toLowerCase());
+    if(it){ const setOk = [...it.sets].reverse().find(x=>x.carga); if(setOk) return setOk.carga; }
+  }
+  return null;
+}
+
+window.iniciarTreino = function(fichaId){
+  const f = fichas.find(x=>x.id===fichaId);
+  if(!f) return;
+  sessaoAtiva = {
+    fichaId:f.id, fichaNome:f.nome, data:new Date().toISOString(),
+    itens: f.exercicios.map(ex=>{
+      const nSeries = parseInt(ex.series)||1;
+      const sugCarga = ultimaCargaExercicio(ex.nome) || ex.carga || "";
+      return {
+        nome:ex.nome, series:ex.series, reps:ex.reps, carga:ex.carga,
+        sets: Array.from({length:nSeries}, ()=>({carga:sugCarga, reps:ex.reps||"", feito:false}))
+      };
+    })
+  };
+  $("#fabTimer").classList.add("show");
+  renderTreinar();
+};
+
+function renderSessaoAtiva(v){
+  const s = sessaoAtiva;
+  let html = `<div class="card row">
+    <div style="flex:1"><h2 style="margin:0">${esc(s.fichaNome)}</h2>
+      <div class="muted">${fmtData(s.data)} · treino em andamento</div></div>
+  </div>`;
+
+  s.itens.forEach((it, ei)=>{
+    const allDone = it.sets.every(x=>x.feito);
+    html += `<div class="ex ${allDone?'done':''}">
+      <div class="ex-head">
+        <b>${esc(it.nome)}</b>
+        <span class="target">meta: ${esc(it.series||'-')}×${esc(it.reps||'-')}${it.carga?` · ${esc(it.carga)}`:''}</span>
+      </div>
+      <div class="ex-sets">
+        <div class="set-head"><span>Set</span><span>Carga (kg)</span><span>Reps</span><span>✓</span></div>`;
+    it.sets.forEach((set, si)=>{
+      html += `<div class="set-row">
+        <div class="n">${si+1}</div>
+        <input type="number" inputmode="decimal" placeholder="—" value="${esc(set.carga)}" oninput="setVal(${ei},${si},'carga',this.value)">
+        <input type="number" inputmode="numeric" placeholder="${esc(it.reps||'—')}" value="${esc(set.reps)}" oninput="setVal(${ei},${si},'reps',this.value)">
+        <div class="chk ${set.feito?'on':''}" onclick="toggleSet(${ei},${si})">${set.feito?'✓':''}</div>
+      </div>`;
+    });
+    html += `<div class="row" style="margin-top:4px">
+        <button class="btn-ghost btn-sm" onclick="addSet(${ei})">+ série</button>
+        <div class="spacer"></div>
+        <button class="btn-ghost btn-sm" onclick="abrirTimer()">⏱️ Descanso</button>
+      </div>
+    </div></div>`;
+  });
+
+  html += `<div class="row" style="margin-top:6px">
+    <button class="btn-ghost full" onclick="cancelarTreino()">Cancelar</button>
+    <button class="btn-ok full" onclick="finalizarTreino()">✓ Finalizar treino</button>
+  </div>`;
+  v.innerHTML = html;
+}
+
+window.setVal = (ei,si,campo,val)=>{ sessaoAtiva.itens[ei].sets[si][campo]=val; };
+window.toggleSet = (ei,si)=>{
+  const set = sessaoAtiva.itens[ei].sets[si];
+  set.feito = !set.feito;
+  if(set.feito && navigator.vibrate) navigator.vibrate(15);
+  if(set.feito) abrirTimer(); // auto-inicia descanso ao concluir série
+  renderTreinar();
+};
+window.addSet = (ei)=>{
+  const it = sessaoAtiva.itens[ei];
+  const last = it.sets[it.sets.length-1] || {carga:"",reps:it.reps||""};
+  it.sets.push({carga:last.carga, reps:last.reps, feito:false});
+  renderTreinar();
+};
+window.cancelarTreino = ()=>{
+  openModal(`<h2>Cancelar treino?</h2><p class="muted">O registro de hoje não será salvo.</p>
+    <div class="row"><button class="btn-ghost full" onclick="closeModal()">Voltar</button>
+    <button class="btn-danger full" onclick="confirmarCancelar()">Cancelar treino</button></div>`);
+};
+window.confirmarCancelar = ()=>{ sessaoAtiva=null; closeModal(); $("#fabTimer").classList.remove("show"); renderTreinar(); toast("Treino descartado"); };
+
+window.finalizarTreino = ()=>{
+  const s = sessaoAtiva;
+  // mantém só séries que tiveram algum dado preenchido
+  const itens = s.itens.map(it=>({
+    nome:it.nome, series:it.series, reps:it.reps, carga:it.carga,
+    sets: it.sets.filter(x=> x.carga!=="" || x.reps!=="" || x.feito)
+  })).filter(it=> it.sets.length>0);
+
+  if(itens.length===0){ toast("Nada registrado ainda"); return; }
+  const total = itens.reduce((a,it)=>a+it.sets.length,0);
+  sessoes.push({ id:uid(), fichaId:s.fichaId, fichaNome:s.fichaNome, data:s.data, itens });
+  salvarSessoes();
+  sessaoAtiva=null;
+  $("#fabTimer").classList.remove("show");
+  stopTimer();
+  toast(`Treino salvo! ${total} séries 🎉`);
+  go("historico");
+};
+
+/* ===================== Aba FICHAS ===================== */
+function renderFichas(){
+  const v = $("#view-fichas");
+  let html = `<div class="row" style="margin-bottom:14px">
+    <button class="btn full" onclick="editarFicha()">+ Nova ficha</button>
+    <button class="btn-ghost" onclick="abrirImportCSV()">📄 CSV</button>
+  </div>`;
+
+  if(fichas.length===0){
+    html += `<div class="empty"><div class="big">📋</div><b>Nenhuma ficha</b><br>
+      <span>Crie manualmente ou importe um arquivo CSV do seu PC.</span></div>`;
+  } else {
+    fichas.forEach(f=>{
+      html += `<div class="ficha-item" onclick="editarFicha('${f.id}')">
+        <div class="ficha-badge">${esc((f.nome||'?').trim().charAt(0).toUpperCase())}</div>
+        <div class="info"><b>${esc(f.nome)}</b><span>${f.exercicios.length} exercícios</span></div>
+        <div class="chev">✏️</div>
+      </div>`;
+    });
+  }
+  html += `<hr><div class="row wrap" style="gap:8px">
+      <button class="btn-ghost btn-sm" onclick="exportarCSV()">⬇️ Exportar fichas (CSV)</button>
+      <button class="btn-ghost btn-sm" onclick="exportarBackup()">💾 Backup completo</button>
+      <button class="btn-ghost btn-sm" onclick="abrirRestore()">↩️ Restaurar backup</button>
+    </div>`;
+  v.innerHTML = html;
+}
+
+window.editarFicha = function(fichaId){
+  const editing = fichas.find(x=>x.id===fichaId);
+  const f = editing ? JSON.parse(JSON.stringify(editing)) : { id:uid(), nome:"", exercicios:[{nome:"",series:"3",reps:"12",carga:""}] };
+
+  function rowsHtml(){
+    return f.exercicios.map((ex,i)=>`<div class="ex-edit-row">
+      <input class="nome" placeholder="Exercício" value="${esc(ex.nome)}" oninput="window._ef.exercicios[${i}].nome=this.value">
+      <input inputmode="numeric" placeholder="Séries" value="${esc(ex.series)}" oninput="window._ef.exercicios[${i}].series=this.value">
+      <input placeholder="Reps" value="${esc(ex.reps)}" oninput="window._ef.exercicios[${i}].reps=this.value">
+      <input inputmode="decimal" placeholder="Carga" value="${esc(ex.carga)}" oninput="window._ef.exercicios[${i}].carga=this.value">
+      <button class="del" onclick="window._efDel(${i})">✕</button>
+    </div>`).join("");
+  }
+  window._ef = f;
+  window._efDel = (i)=>{ f.exercicios.splice(i,1); $("#efRows").innerHTML = rowsHtml(); };
+  window._efAdd = ()=>{ f.exercicios.push({nome:"",series:"3",reps:"12",carga:""}); $("#efRows").innerHTML = rowsHtml(); };
+  window._efSalvar = ()=>{
+    f.nome = (f.nome||"").trim();
+    f.exercicios = f.exercicios.filter(e=> (e.nome||"").trim());
+    if(!f.nome){ toast("Dê um nome à ficha"); return; }
+    if(f.exercicios.length===0){ toast("Adicione ao menos 1 exercício"); return; }
+    const idx = fichas.findIndex(x=>x.id===f.id);
+    if(idx>=0) fichas[idx]=f; else fichas.push(f);
+    salvarFichas(); closeModal(); renderFichas(); toast("Ficha salva ✓");
+  };
+  window._efExcluir = ()=>{
+    fichas = fichas.filter(x=>x.id!==f.id); salvarFichas(); closeModal(); renderFichas(); toast("Ficha excluída");
+  };
+
+  openModal(`<h2>${editing?'Editar':'Nova'} ficha</h2>
+    <div class="field"><label>Nome (ex: Treino A — Peito/Tríceps)</label>
+      <input id="efNome" value="${esc(f.nome)}" oninput="window._ef.nome=this.value" placeholder="Treino A"></div>
+    <label>Exercícios</label>
+    <div class="edit-head"><span>Nome</span><span>Séries</span><span>Reps</span><span>Carga</span><span></span></div>
+    <div id="efRows">${rowsHtml()}</div>
+    <button class="btn-ghost btn-sm" onclick="window._efAdd()" style="margin:4px 0 14px">+ exercício</button>
+    <div class="row"><button class="btn full" onclick="window._efSalvar()">Salvar ficha</button></div>
+    ${editing?`<button class="btn-danger full" style="margin-top:10px" onclick="window._efExcluir()">Excluir ficha</button>`:''}
+  `);
+};
+
+/* ---------- Import / Export CSV ---------- */
+window.abrirImportCSV = ()=>{
+  openModal(`<h2>Importar treino (CSV)</h2>
+    <p class="muted" style="line-height:1.5">Monte a planilha no PC com estas colunas e salve como <b>CSV</b>:</p>
+    <p><code>treino, exercicio, series, repeticoes, carga</code></p>
+    <p class="muted">Cada linha = 1 exercício. Linhas com o mesmo "treino" viram a mesma ficha. Aceita separador vírgula <b>ou</b> ponto-e-vírgula.</p>
+    <input type="file" id="csvFile" accept=".csv,text/csv" style="margin:10px 0">
+    <div class="row"><button class="btn-ghost full" onclick="closeModal()">Cancelar</button></div>`);
+  $("#csvFile").addEventListener("change", e=>{
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=> importarCSV(reader.result);
+    reader.readAsText(file, "UTF-8");
+  });
+};
+
+function parseCSV(text){
+  // detecta separador
+  const firstLine = text.split(/\r?\n/)[0]||"";
+  const sep = (firstLine.split(";").length > firstLine.split(",").length) ? ";" : ",";
+  const rows = [];
+  text.split(/\r?\n/).forEach(line=>{
+    if(line.trim()==="") return;
+    // parser simples com suporte a aspas
+    const out=[]; let cur=""; let q=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(c==='"'){ if(q && line[i+1]==='"'){cur+='"';i++;} else q=!q; }
+      else if(c===sep && !q){ out.push(cur); cur=""; }
+      else cur+=c;
+    }
+    out.push(cur);
+    rows.push(out.map(s=>s.trim()));
+  });
+  return rows;
+}
+function norm(s){ return (s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").trim(); }
+
+function importarCSV(text){
+  try{
+    const rows = parseCSV(text);
+    if(rows.length<2){ toast("CSV vazio ou inválido"); return; }
+    const header = rows[0].map(norm);
+    const col = (names)=> header.findIndex(h=> names.includes(h));
+    const ci = {
+      treino: col(["treino","ficha","dia","grupo"]),
+      ex:     col(["exercicio","exercício","nome","movimento"]),
+      series: col(["series","séries","sets"]),
+      reps:   col(["repeticoes","repetições","reps","rep"]),
+      carga:  col(["carga","peso","kg","carga(kg)"]),
+    };
+    if(ci.ex<0){ toast("Falta a coluna 'exercicio'"); return; }
+    const map = {};
+    let count=0;
+    for(let r=1;r<rows.length;r++){
+      const row = rows[r];
+      const nomeEx = (row[ci.ex]||"").trim();
+      if(!nomeEx) continue;
+      const treino = (ci.treino>=0 ? row[ci.treino] : "Importado").trim() || "Importado";
+      if(!map[treino]) map[treino]=[];
+      map[treino].push({
+        nome:nomeEx,
+        series:(ci.series>=0?row[ci.series]:"")||"3",
+        reps:(ci.reps>=0?row[ci.reps]:"")||"12",
+        carga:(ci.carga>=0?row[ci.carga]:"")||"",
+      });
+      count++;
+    }
+    const nomesTreino = Object.keys(map);
+    if(nomesTreino.length===0){ toast("Nenhum exercício encontrado"); return; }
+    nomesTreino.forEach(nome=>{
+      const existente = fichas.find(f=> norm(f.nome)===norm(nome));
+      if(existente){ existente.exercicios = map[nome]; }
+      else fichas.push({ id:uid(), nome, exercicios:map[nome] });
+    });
+    salvarFichas(); closeModal(); renderFichas();
+    toast(`Importado: ${nomesTreino.length} ficha(s), ${count} exercícios ✓`);
+  }catch(err){ toast("Erro ao ler CSV"); console.error(err); }
+}
+
+function baixarArquivo(nome, conteudo, tipo="text/csv;charset=utf-8"){
+  const blob = new Blob(["﻿"+conteudo], {type:tipo});
+  const url = URL.createObjectURL(blob);
+  const a = el("a"); a.href=url; a.download=nome; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 100);
+}
+window.exportarCSV = ()=>{
+  if(fichas.length===0){ toast("Sem fichas para exportar"); return; }
+  let csv = "treino,exercicio,series,repeticoes,carga\n";
+  fichas.forEach(f=> f.exercicios.forEach(ex=>{
+    const q = s => `"${String(s??"").replace(/"/g,'""')}"`;
+    csv += [q(f.nome),q(ex.nome),q(ex.series),q(ex.reps),q(ex.carga)].join(",")+"\n";
+  }));
+  baixarArquivo("minhas-fichas.csv", csv);
+  toast("CSV exportado ✓");
+};
+window.exportarBackup = ()=>{
+  const data = JSON.stringify({ fichas, sessoes, cfg, v:1 }, null, 2);
+  baixarArquivo("backup-treinos.json", data, "application/json");
+  toast("Backup gerado ✓");
+};
+window.abrirRestore = ()=>{
+  openModal(`<h2>Restaurar backup</h2>
+    <p class="muted">Selecione um arquivo <code>backup-treinos.json</code>. Isso substitui os dados atuais.</p>
+    <input type="file" id="bkFile" accept=".json,application/json" style="margin:10px 0">
+    <div class="row"><button class="btn-ghost full" onclick="closeModal()">Cancelar</button></div>`);
+  $("#bkFile").addEventListener("change", e=>{
+    const file=e.target.files[0]; if(!file) return;
+    const rd=new FileReader();
+    rd.onload=()=>{ try{
+      const d=JSON.parse(rd.result);
+      if(d.fichas) fichas=d.fichas; if(d.sessoes) sessoes=d.sessoes; if(d.cfg) cfg=d.cfg;
+      salvarFichas(); salvarSessoes(); salvarCfg(); closeModal(); renderFichas(); toast("Backup restaurado ✓");
+    }catch(err){ toast("Arquivo inválido"); } };
+    rd.readAsText(file);
+  });
+};
+
+/* ===================== Aba HISTÓRICO ===================== */
+function renderHistorico(){
+  const v = $("#view-historico");
+  if(sessoes.length===0){
+    v.innerHTML = `<div class="empty"><div class="big">📈</div><b>Sem treinos registrados</b><br>
+      <span>Quando você finalizar um treino, ele aparece aqui.</span></div>`;
+    return;
+  }
+  // resumo
+  const total = sessoes.length;
+  const exercicios = [...new Set(sessoes.flatMap(s=>s.itens.map(i=>i.nome)))].sort((a,b)=>a.localeCompare(b));
+
+  let html = `<div class="card"><h2>${total} treino${total>1?'s':''} registrado${total>1?'s':''}</h2>
+    <div class="muted">Veja a evolução de carga por exercício abaixo.</div>
+    <div class="field" style="margin-top:12px"><label>Evolução do exercício</label>
+      <select id="selEvo" onchange="renderEvolucao(this.value)">
+        <option value="">— selecione —</option>
+        ${exercicios.map(e=>`<option value="${esc(e)}">${esc(e)}</option>`).join("")}
+      </select></div>
+    <div id="evoBox"></div>
+  </div>`;
+
+  html += `<h2 style="font-size:15px; margin:18px 4px 10px">Treinos recentes</h2>`;
+  const ord = [...sessoes].sort((a,b)=> b.data.localeCompare(a.data));
+  ord.forEach(s=>{
+    const totalSets = s.itens.reduce((a,i)=>a+i.sets.length,0);
+    html += `<div class="sess-item">
+      <div class="top"><span class="data">${fmtData(s.data)}</span>
+        <span class="pill">${esc(s.fichaNome)}</span><div class="spacer"></div>
+        <button class="del" onclick="excluirSessao('${s.id}')" style="background:none;border:none;color:var(--muted);font-size:18px">🗑️</button>
+      </div>
+      <details><summary>${s.itens.length} exercícios · ${totalSets} séries</summary>
+        <ul>${s.itens.map(it=>{
+          const melhor = it.sets.reduce((m,x)=> (parseFloat(x.carga)||0)>m ? (parseFloat(x.carga)||0):m, 0);
+          const det = it.sets.map(x=>`${x.carga||'–'}×${x.reps||'–'}`).join("  ·  ");
+          return `<li><b style="color:var(--txt)">${esc(it.nome)}</b> — ${det}${melhor?` <span style="color:var(--ok)">(top ${melhor}kg)</span>`:''}</li>`;
+        }).join("")}</ul>
+      </details>
+    </div>`;
+  });
+  v.innerHTML = html;
+}
+
+window.renderEvolucao = (nome)=>{
+  const box = $("#evoBox");
+  if(!nome){ box.innerHTML=""; return; }
+  // pega maior carga por sessão (ao longo do tempo)
+  const pontos = [];
+  [...sessoes].sort((a,b)=>a.data.localeCompare(b.data)).forEach(s=>{
+    const it = s.itens.find(i=>i.nome===nome);
+    if(!it) return;
+    const maxC = it.sets.reduce((m,x)=> Math.max(m, parseFloat(x.carga)||0), 0);
+    if(maxC>0) pontos.push({ data:s.data, carga:maxC });
+  });
+  if(pontos.length===0){ box.innerHTML=`<div class="muted">Sem carga registrada para este exercício.</div>`; return; }
+  if(pontos.length===1){
+    box.innerHTML=`<div class="muted">1 registro: <b style="color:var(--txt)">${pontos[0].carga}kg</b> em ${fmtData(pontos[0].data)}. Faça mais treinos para ver o gráfico.</div>`;
+    return;
+  }
+  // monta SVG line chart
+  const W=600,H=130,P=24;
+  const cargas = pontos.map(p=>p.carga);
+  const min=Math.min(...cargas), max=Math.max(...cargas);
+  const rng = (max-min)||1;
+  const x = i => P + (i/(pontos.length-1))*(W-2*P);
+  const y = c => H-P - ((c-min)/rng)*(H-2*P);
+  const path = pontos.map((p,i)=>`${i===0?'M':'L'} ${x(i).toFixed(1)} ${y(p.carga).toFixed(1)}`).join(" ");
+  const dots = pontos.map((p,i)=>`<circle class="chart-dot" cx="${x(i).toFixed(1)}" cy="${y(p.carga).toFixed(1)}" r="3.5"/>`).join("");
+  const primeiro=pontos[0].carga, ultimo=pontos[pontos.length-1].carga;
+  const diff = ultimo-primeiro;
+  const tag = diff>0?`<span style="color:var(--ok)">▲ +${diff}kg</span>`: diff<0?`<span style="color:var(--danger)">▼ ${diff}kg</span>`:`<span class="muted">sem variação</span>`;
+  box.innerHTML = `
+    <div class="row" style="font-size:13px; margin-top:4px"><span class="muted">de ${primeiro}kg → ${ultimo}kg</span><div class="spacer"></div>${tag}</div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      <text x="${P}" y="14" fill="var(--muted)" font-size="11">máx ${max}kg</text>
+      <text x="${P}" y="${H-4}" fill="var(--muted)" font-size="11">mín ${min}kg</text>
+    </svg>`;
+};
+
+window.excluirSessao = (id)=>{
+  openModal(`<h2>Excluir este treino?</h2><p class="muted">Não dá para desfazer.</p>
+    <div class="row"><button class="btn-ghost full" onclick="closeModal()">Voltar</button>
+    <button class="btn-danger full" onclick="window._delSess('${id}')">Excluir</button></div>`);
+};
+window._delSess = (id)=>{ sessoes = sessoes.filter(s=>s.id!==id); salvarSessoes(); closeModal(); renderHistorico(); toast("Treino excluído"); };
+
+/* ===================== Cronômetro de descanso ===================== */
+let timerInt=null, timerRem=0, timerTotal=0;
+let audioCtx=null;
+function beep(){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    [0,150,300].forEach((delay,i)=>{
+      const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.frequency.value = i<2?880:1175; o.connect(g); g.connect(audioCtx.destination);
+      const t=audioCtx.currentTime + delay/1000;
+      g.gain.setValueAtTime(0.001,t); g.gain.exponentialRampToValueAtTime(0.3,t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.001,t+0.18);
+      o.start(t); o.stop(t+0.2);
+    });
+  }catch(e){}
+}
+function renderTimerModal(){
+  const m = Math.floor(timerRem/60), s = timerRem%60;
+  const disp = `${m}:${String(s).padStart(2,'0')}`;
+  $("#modalContent").innerHTML = `<div class="grabber"></div>
+    <h2>Descanso</h2>
+    <div class="timer-display ${timerRem<=5&&timerRem>0?'warn':''}" id="timerDisp">${disp}</div>
+    <div class="timer-presets">
+      <button class="btn-ghost" onclick="startTimer(30)">30s</button>
+      <button class="btn-ghost" onclick="startTimer(60)">60s</button>
+      <button class="btn-ghost" onclick="startTimer(90)">90s</button>
+      <button class="btn-ghost" onclick="startTimer(120)">2min</button>
+      <button class="btn-ghost" onclick="startTimer(180)">3min</button>
+    </div>
+    <div class="row">
+      <button class="btn-ghost full" onclick="addTimer(15)">+15s</button>
+      <button class="btn-ghost full" onclick="stopTimer(); renderTimerModal()">Zerar</button>
+      <button class="btn full" onclick="closeModal()">Fechar</button>
+    </div>
+    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s</p>`;
+}
+window.abrirTimer = ()=>{
+  $("#modalBg").classList.add("show");
+  renderTimerModal();
+  if(!timerInt) startTimer(cfg.descanso);
+};
+window.startTimer = (secs)=>{
+  stopTimer();
+  timerTotal=secs; timerRem=secs;
+  if(audioCtx==null){ try{ audioCtx=new(window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  updateTimerDisplay();
+  timerInt = setInterval(()=>{
+    timerRem--;
+    updateTimerDisplay();
+    if(timerRem<=0){
+      stopTimer(); beep();
+      if(navigator.vibrate) navigator.vibrate([200,100,200]);
+      const d=$("#timerDisp"); if(d){ d.textContent="0:00"; }
+      toast("Descanso acabou! 🔔");
+    }
+  },1000);
+};
+function updateTimerDisplay(){
+  const d=$("#timerDisp"); if(!d) return;
+  const m=Math.floor(timerRem/60), s=timerRem%60;
+  d.textContent=`${m}:${String(s).padStart(2,'0')}`;
+  d.classList.toggle("warn", timerRem<=5 && timerRem>0);
+}
+window.addTimer = (s)=>{ timerRem+=s; if(!timerInt) startTimer(timerRem); else updateTimerDisplay(); };
+window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } };
+$("#fabTimer").addEventListener("click", ()=>abrirTimer());
+
+/* ===================== Config ===================== */
+$("#btnConfig").addEventListener("click", ()=>{
+  openModal(`<h2>Configurações</h2>
+    <div class="field"><label>Tempo de descanso padrão (segundos)</label>
+      <input type="number" inputmode="numeric" id="cfgDesc" value="${cfg.descanso}"></div>
+    <button class="btn full" onclick="window._salvarCfg()">Salvar</button>
+    <hr>
+    <p class="muted" style="font-size:12px; line-height:1.6">
+      Os dados ficam salvos só neste aparelho. Use <b>Backup completo</b> na aba Fichas de tempos em tempos.<br>
+      Fichas: ${fichas.length} · Treinos: ${sessoes.length}
+    </p>`);
+});
+window._salvarCfg = ()=>{
+  const v = parseInt($("#cfgDesc").value)||90;
+  cfg.descanso = Math.max(5, v); salvarCfg(); closeModal(); toast("Configuração salva ✓");
+};
+
+/* ===================== Init ===================== */
+go("treinar");
+
+/* registra service worker p/ funcionar offline (se disponível) */
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
+</script>
+</body>
+</html>
