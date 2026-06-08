@@ -220,7 +220,7 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "1.3 (tela ligada no descanso)";
+const APP_VERSION = "1.4 (alarme em 2º plano + tela de bloqueio)";
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
 const KEY_CFG    = "gym_config_v1";
@@ -741,8 +741,46 @@ window._delSess = (id)=>{ sessoes = sessoes.filter(s=>s.id!==id); salvarSessoes(
 
 /* ===================== Cronômetro de descanso ===================== */
 let timerInt=null, timerRem=0, timerTotal=0;
-let alarming=false, alarmNodes=null, alarmVibInt=null, keepAlive=null;
-let audioCtx=null;
+let alarming=false, alarmVibInt=null;
+let audioCtx=null, oscAlarm=null;            // Web Audio é só fallback agora
+let silentEl=null, alarmEl=null, mediaReady=false;
+
+/* ---- Áudio via elemento <audio> (data URI WAV) ----
+   Um <audio> em loop mantém a "sessão de áudio" do iOS ativa, permitindo que
+   o som continue com a tela bloqueada / app em segundo plano — algo que a
+   Web Audio API sozinha não consegue no iPhone. */
+function wavDataUri(samples, sr){
+  const n=samples.length, buf=new ArrayBuffer(44+n*2), dv=new DataView(buf);
+  const wr=(off,s)=>{ for(let i=0;i<s.length;i++) dv.setUint8(off+i, s.charCodeAt(i)); };
+  wr(0,"RIFF"); dv.setUint32(4,36+n*2,true); wr(8,"WAVE"); wr(12,"fmt ");
+  dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+  dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true);
+  wr(36,"data"); dv.setUint32(40,n*2,true);
+  let off=44; for(let i=0;i<n;i++){ const v=Math.max(-1,Math.min(1,samples[i])); dv.setInt16(off, v*32767, true); off+=2; }
+  const bytes=new Uint8Array(buf); let bin=""; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  return "data:audio/wav;base64,"+btoa(bin);
+}
+function buildAudioEls(){
+  try{
+    const sr=8000;
+    // faixa "silenciosa" (amplitude minúscula) só p/ segurar a sessão de áudio
+    const silent=new Float32Array(sr); // 1s, em loop
+    for(let i=0;i<silent.length;i++) silent[i]=Math.sin(2*Math.PI*60*i/sr)*0.0004;
+    // alarme: 5 apitos em 2s, alternando 880/1320Hz (0,2s tom + 0,2s pausa), em loop
+    const al=new Float32Array(sr*2);
+    for(let b=0;b<5;b++){
+      const f=(b%2===0)?880:1320, ini=Math.floor(b*0.4*sr), len=Math.floor(0.2*sr);
+      for(let i=0;i<len;i++){
+        const env=Math.min(1, i/80, (len-i)/80); // evita estalos no início/fim
+        al[ini+i]=Math.sin(2*Math.PI*f*i/sr)*0.5*env;
+      }
+    }
+    silentEl=new Audio(wavDataUri(silent,sr)); silentEl.loop=true; silentEl.preload="auto";
+    alarmEl =new Audio(wavDataUri(al,sr));      alarmEl.loop=true;  alarmEl.preload="auto";
+  }catch(e){}
+}
+buildAudioEls();
+
 function ensureAudio(){
   try{
     if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
@@ -750,90 +788,116 @@ function ensureAudio(){
   }catch(e){}
   return audioCtx;
 }
-// "Destrava" o áudio no iOS: na 1ª interação do usuário toca um som inaudível
+// "Destrava" o áudio no iOS na 1ª interação: Web Audio + elementos <audio>
 function unlockAudio(){
-  const ctx = ensureAudio(); if(!ctx) return;
-  try{
-    const o=ctx.createOscillator(), g=ctx.createGain();
-    g.gain.value=0.0001; o.connect(g); g.connect(ctx.destination);
-    o.start(); o.stop(ctx.currentTime+0.02);
-  }catch(e){}
+  ensureAudio();
+  if(!mediaReady){
+    [silentEl,alarmEl].forEach(a=>{
+      if(!a) return;
+      try{
+        a.muted=true;
+        const p=a.play();
+        if(p&&p.then) p.then(()=>{ a.pause(); a.currentTime=0; a.muted=false; }).catch(()=>{ a.muted=false; });
+        else a.muted=false;
+      }catch(e){ a.muted=false; }
+    });
+    mediaReady=true;
+  }
 }
 document.addEventListener("touchend", unlockAudio, {once:true});
 document.addEventListener("click", unlockAudio, {once:true});
 
-function beep(){
-  const ctx = ensureAudio(); if(!ctx) return;
-  try{
-    // alarme: 6 apitos alternados em ~1,7s, volume alto (toca no fone também)
-    const seq=[0, 0.24, 0.48, 0.74, 1.04, 1.34];
-    seq.forEach((t0,i)=>{
-      const o=ctx.createOscillator(), g=ctx.createGain();
-      o.type="square";
-      o.frequency.value = (i%2===0) ? 880 : 1320;
-      o.connect(g); g.connect(ctx.destination);
-      const t=ctx.currentTime + t0;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.5, t+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t+0.20);
-      o.start(t); o.stop(t+0.22);
-    });
-  }catch(e){}
-}
-/* keep-alive: mantém o contexto de áudio "acordado" durante a contagem.
-   No iOS o contexto adormece em silêncio e perde a permissão de tocar fora
-   de um gesto do usuário; um oscilador inaudível rodando evita isso e
-   garante que o alarme consiga soar quando o tempo zerar. */
+/* keep-alive: toca a faixa silenciosa em loop p/ manter a sessão de áudio do
+   iOS ativa durante a contagem (assim o alarme soa mesmo com a tela bloqueada). */
 function startKeepAlive(){
-  const ctx = ensureAudio(); if(!ctx) return;
-  stopKeepAlive();
-  try{
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    g.gain.value = 0.0001; o.connect(g); g.connect(ctx.destination);
-    o.start(); keepAlive = { o, g };
-  }catch(e){}
+  if(!silentEl) return;
+  try{ silentEl.currentTime=0; const p=silentEl.play(); if(p&&p.catch) p.catch(()=>{}); }catch(e){}
 }
 function stopKeepAlive(){
-  if(!keepAlive) return;
-  try{ keepAlive.o.stop(); }catch(e){}
-  try{ keepAlive.o.disconnect(); }catch(e){}
-  try{ keepAlive.g.disconnect(); }catch(e){}
-  keepAlive = null;
+  if(!silentEl) return;
+  try{ silentEl.pause(); silentEl.currentTime=0; }catch(e){}
 }
-/* alarme contínuo até o usuário fechar o cronômetro.
-   Um oscilador "tom" toca direto e um LFO quadrado liga/desliga o ganho
-   ~2,5x por segundo. São poucos nós e nada depende de setInterval, então o
-   som não para sozinho no iOS. */
-function startAlarm(){
-  stopAlarm();
-  alarming = true;
-  if(navigator.vibrate){
-    navigator.vibrate([200,100,200]);
-    alarmVibInt = setInterval(()=>{ if(navigator.vibrate) navigator.vibrate([200,100,200]); }, 1200);
-  }
-  const ctx = ensureAudio(); if(!ctx) return;
+
+/* fallback de alarme via Web Audio (se o <audio> for bloqueado) */
+function startOscAlarm(){
+  const ctx=ensureAudio(); if(!ctx) return;
   try{
-    const carrier = ctx.createOscillator();         // tom audível
-    carrier.type = "square"; carrier.frequency.value = 880;
-    const amp = ctx.createGain(); amp.gain.value = 0.2;   // offset do ganho
-    const lfo = ctx.createOscillator();             // liga/desliga o som
-    lfo.type = "square"; lfo.frequency.value = 2.5;
-    const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.2;
-    lfo.connect(lfoGain); lfoGain.connect(amp.gain); // ganho oscila ~0–0,4
+    const carrier=ctx.createOscillator(); carrier.type="square"; carrier.frequency.value=880;
+    const amp=ctx.createGain(); amp.gain.value=0.2;
+    const lfo=ctx.createOscillator(); lfo.type="square"; lfo.frequency.value=2.5;
+    const lfoGain=ctx.createGain(); lfoGain.gain.value=0.2;
+    lfo.connect(lfoGain); lfoGain.connect(amp.gain);
     carrier.connect(amp); amp.connect(ctx.destination);
     carrier.start(); lfo.start();
-    alarmNodes = { carrier, lfo, amp, lfoGain };
+    oscAlarm={carrier,lfo,amp,lfoGain};
   }catch(e){}
+}
+function stopOscAlarm(){
+  if(!oscAlarm) return;
+  try{ oscAlarm.carrier.stop(); }catch(e){}
+  try{ oscAlarm.lfo.stop(); }catch(e){}
+  for(const k in oscAlarm){ try{ oscAlarm[k].disconnect(); }catch(e){} }
+  oscAlarm=null;
+}
+
+/* alarme contínuo até o usuário fechar o cronômetro */
+function startAlarm(){
+  stopAlarm();
+  alarming=true;
+  if(navigator.vibrate){
+    navigator.vibrate([200,100,200]);
+    alarmVibInt=setInterval(()=>{ if(navigator.vibrate) navigator.vibrate([200,100,200]); },1200);
+  }
+  let ok=false;
+  if(alarmEl){
+    try{
+      alarmEl.muted=false; alarmEl.volume=1; alarmEl.currentTime=0;
+      const p=alarmEl.play();
+      if(p&&p.then){ ok=true; p.catch(()=>{ startOscAlarm(); }); }
+    }catch(e){}
+  }
+  if(!ok) startOscAlarm();   // sem <audio>/Promise -> garante som via Web Audio
+  updateMediaSession();
 }
 function stopAlarm(){
   if(alarmVibInt){ clearInterval(alarmVibInt); alarmVibInt=null; }
-  if(alarmNodes){
-    try{ alarmNodes.carrier.stop(); }catch(e){}
-    try{ alarmNodes.lfo.stop(); }catch(e){}
-    for(const k in alarmNodes){ try{ alarmNodes[k].disconnect(); }catch(e){} }
-    alarmNodes = null;
-  }
-  if(alarming){ alarming = false; stopKeepAlive(); releaseWakeLock(); }
+  if(alarmEl){ try{ alarmEl.pause(); alarmEl.currentTime=0; }catch(e){} }
+  stopOscAlarm();
+  if(alarming){ alarming=false; stopKeepAlive(); releaseWakeLock(); clearMediaSession(); }
+}
+
+/* ---- Media Session: mostra o descanso na tela de bloqueio ---- */
+function setupMediaSession(){
+  if(!("mediaSession" in navigator)) return;
+  try{
+    navigator.mediaSession.setActionHandler("stop", ()=>{ closeModal(); });
+    // se o usuário tocar em pausar na tela de bloqueio durante o alarme, silencia
+    navigator.mediaSession.setActionHandler("pause", ()=>{ if(alarming) closeModal(); });
+    navigator.mediaSession.setActionHandler("play", ()=>{}); // mantém a sessão viva
+  }catch(e){}
+}
+function updateMediaSession(){
+  if(!("mediaSession" in navigator)) return;
+  try{
+    const mm=Math.floor(timerRem/60), ss=String(timerRem%60).padStart(2,'0');
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: alarming ? "⏰ Descanso acabou!" : `Descanso ${mm}:${ss}`,
+      artist: sessaoAtiva ? sessaoAtiva.fichaNome : "Treinos",
+      album: "Cronômetro de descanso"
+    });
+    navigator.mediaSession.playbackState = "playing";
+    if(!alarming && timerTotal>0){
+      navigator.mediaSession.setPositionState({
+        duration: timerTotal,
+        position: Math.min(timerTotal, Math.max(0, timerTotal-timerRem)),
+        playbackRate: 1
+      });
+    }
+  }catch(e){}
+}
+function clearMediaSession(){
+  if(!("mediaSession" in navigator)) return;
+  try{ navigator.mediaSession.metadata=null; navigator.mediaSession.playbackState="none"; }catch(e){}
 }
 function renderTimerModal(){
   const m = Math.floor(timerRem/60), s = timerRem%60;
@@ -853,7 +917,7 @@ function renderTimerModal(){
       <button class="btn-ghost full" onclick="stopTimer(); renderTimerModal()">Zerar</button>
       <button class="btn full" onclick="closeModal()">Fechar</button>
     </div>
-    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔆 a tela fica ligada durante o descanso · 🔔 o alarme toca até você tocar em <b>Fechar</b></p>`;
+    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔔 o alarme toca até você tocar em <b>Fechar</b> e tenta soar mesmo com a tela bloqueada</p>`;
 }
 window.abrirTimer = ()=>{
   $("#modalBg").classList.add("show");
@@ -882,12 +946,15 @@ window.startTimer = (secs)=>{
   stopTimer();
   timerTotal=secs; timerRem=secs;
   ensureAudio();
-  startKeepAlive();   // mantém o áudio vivo até o tempo zerar (essencial no iOS)
+  startKeepAlive();   // segura a sessão de áudio até o tempo zerar (essencial no iOS)
+  setupMediaSession();
   updateTimerDisplay();
+  updateMediaSession();
   requestWakeLock();
   timerInt = setInterval(()=>{
     timerRem--;
     updateTimerDisplay();
+    updateMediaSession();
     if(timerRem<=0){
       // para a contagem mas mantém a tela ligada enquanto o alarme toca
       if(timerInt){ clearInterval(timerInt); timerInt=null; }
@@ -904,7 +971,7 @@ function updateTimerDisplay(){
   d.classList.toggle("warn", timerRem<=5 && timerRem>0);
 }
 window.addTimer = (s)=>{ timerRem+=s; if(!timerInt) startTimer(timerRem); else updateTimerDisplay(); };
-window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } stopAlarm(); stopKeepAlive(); releaseWakeLock(); };
+window.stopTimer = ()=>{ if(timerInt){ clearInterval(timerInt); timerInt=null; } stopAlarm(); stopKeepAlive(); releaseWakeLock(); clearMediaSession(); };
 $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 
 /* ===================== Config ===================== */
