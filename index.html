@@ -223,8 +223,9 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "1.7";
-const APP_BUILD = "2026-06-09 · descanso por exercício";
+const APP_VERSION = "1.8";
+const APP_BUILD = "2026-06-09 · descanso só por exercício";
+const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
 const KEY_CFG    = "gym_config_v1";
@@ -339,7 +340,7 @@ window.iniciarTreino = function(fichaId){
     itens: f.exercicios.map(ex=>{
       const nSeries = parseInt(ex.series)||1;
       const sugCarga = ultimaCargaExercicio(ex.nome) || ex.carga || "";
-      const desc = parseInt(String(ex.descanso).replace(/\D/g,"")) || cfg.descanso;
+      const desc = parseInt(String(ex.descanso).replace(/\D/g,"")) || DEFAULT_REST;
       return {
         nome:ex.nome, series:ex.series, reps:ex.reps, carga:ex.carga, descanso:desc,
         sets: Array.from({length:nSeries}, ()=>({carga:sugCarga, reps:ex.reps||"", feito:false, tag:""}))
@@ -499,7 +500,7 @@ function renderFichas(){
 
 window.editarFicha = function(fichaId){
   const editing = fichas.find(x=>x.id===fichaId);
-  const f = editing ? JSON.parse(JSON.stringify(editing)) : { id:uid(), nome:"", exercicios:[{nome:"",series:"3",reps:"12",carga:"",descanso:""}] };
+  const f = editing ? JSON.parse(JSON.stringify(editing)) : { id:uid(), nome:"", exercicios:[{nome:"",series:"3",reps:"12",carga:"",descanso:String(DEFAULT_REST)}] };
 
   function rowsHtml(){
     return f.exercicios.map((ex,i)=>`<div class="ex-edit-row">
@@ -507,13 +508,13 @@ window.editarFicha = function(fichaId){
       <input inputmode="numeric" placeholder="Séries" value="${esc(ex.series)}" oninput="window._ef.exercicios[${i}].series=this.value">
       <input placeholder="Reps" value="${esc(ex.reps)}" oninput="window._ef.exercicios[${i}].reps=this.value">
       <input inputmode="decimal" placeholder="Carga" value="${esc(ex.carga)}" oninput="window._ef.exercicios[${i}].carga=this.value">
-      <input inputmode="numeric" placeholder="${cfg.descanso}" value="${esc(ex.descanso)}" oninput="window._ef.exercicios[${i}].descanso=this.value" title="Descanso em segundos">
+      <input inputmode="numeric" placeholder="${DEFAULT_REST}" value="${esc(ex.descanso)}" oninput="window._ef.exercicios[${i}].descanso=this.value" title="Descanso em segundos">
       <button class="del" onclick="window._efDel(${i})">✕</button>
     </div>`).join("");
   }
   window._ef = f;
   window._efDel = (i)=>{ f.exercicios.splice(i,1); $("#efRows").innerHTML = rowsHtml(); };
-  window._efAdd = ()=>{ f.exercicios.push({nome:"",series:"3",reps:"12",carga:"",descanso:""}); $("#efRows").innerHTML = rowsHtml(); };
+  window._efAdd = ()=>{ f.exercicios.push({nome:"",series:"3",reps:"12",carga:"",descanso:String(DEFAULT_REST)}); $("#efRows").innerHTML = rowsHtml(); };
   window._efSalvar = ()=>{
     f.nome = (f.nome||"").trim();
     f.exercicios = f.exercicios.filter(e=> (e.nome||"").trim());
@@ -942,12 +943,12 @@ function renderTimerModal(){
       <button class="btn-ghost full" onclick="stopTimer(); renderTimerModal()">Zerar</button>
       <button class="btn full" onclick="closeModal()">Fechar</button>
     </div>
-    <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔔 o alarme toca até você tocar em <b>Fechar</b> e tenta soar mesmo com a tela bloqueada</p>`;
+    <p class="muted" style="text-align:center; margin-top:10px">🔔 o alarme toca até você tocar em <b>Fechar</b> e tenta soar mesmo com a tela bloqueada</p>`;
 }
 window.abrirTimer = (secs)=>{
   $("#modalBg").classList.add("show");
   renderTimerModal();
-  if(!timerInt) startTimer(parseInt(secs)||cfg.descanso);
+  if(!timerInt) startTimer(parseInt(secs)||DEFAULT_REST);
 };
 /* Mantém a tela ligada enquanto o descanso roda (Wake Lock) */
 let wakeLock = null;
@@ -1016,10 +1017,7 @@ $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 /* ===================== Config ===================== */
 $("#btnConfig").addEventListener("click", ()=>{
   openModal(`<h2>Configurações</h2>
-    <div class="field"><label>Descanso padrão (segundos) — usado quando o exercício não define</label>
-      <input type="number" inputmode="numeric" id="cfgDesc" value="${cfg.descanso}"></div>
-    <button class="btn full" onclick="window._salvarCfg()">Salvar</button>
-    <hr>
+    <p class="muted" style="line-height:1.5">O <b>descanso é definido por exercício</b>, na ficha. Edite a ficha (aba Fichas) para ajustar o tempo de cada exercício — ele fica registrado e usado automaticamente no treino.</p>
     <button class="btn-ghost full" onclick="window._forcarAtualizar()">🔄 Forçar atualização (limpar cache)</button>
     <p class="muted" style="font-size:12px; line-height:1.6; margin-top:12px">
       Os dados ficam salvos só neste aparelho. Use <b>Backup completo</b> na aba Fichas de tempos em tempos.<br>
@@ -1027,10 +1025,6 @@ $("#btnConfig").addEventListener("click", ()=>{
       <b>Versão ${APP_VERSION}</b> · ${esc(APP_BUILD)}
     </p>`);
 });
-window._salvarCfg = ()=>{
-  const v = parseInt($("#cfgDesc").value)||90;
-  cfg.descanso = Math.max(5, v); salvarCfg(); closeModal(); toast("Configuração salva ✓");
-};
 /* Limpa service worker + caches e recarrega buscando da rede. Útil p/ confirmar
    que a versão nova realmente chegou (PWA no iOS costuma servir cache antigo). */
 window._forcarAtualizar = async ()=>{
