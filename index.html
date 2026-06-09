@@ -226,8 +226,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.0";
-const APP_BUILD = "2026-06-09 · sincronização na nuvem (Firebase)";
+const APP_VERSION = "2.1";
+const APP_BUILD = "2026-06-09 · login Google no PWA (proxy auth)";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -237,7 +237,10 @@ const KEY_UPDATED= "gym_updated_v1";   // carimbo da última alteração local (
 /* Config pública do Firebase (seguro embutir no cliente; segurança via Rules+login) */
 const FB_CONFIG = {
   apiKey: "AIzaSyCs7jkpv4wZ6f556HGAEtLPh3J3mmt_A2I",
-  authDomain: "treinos-6431a.firebaseapp.com",
+  // authDomain aponta para o próprio domínio (proxy no netlify.toml) p/ o login
+  // funcionar no PWA standalone do iOS. Fallback p/ firebaseapp.com fora dele.
+  authDomain: (location.hostname === "treinos-caio.netlify.app")
+    ? "treinos-caio.netlify.app" : "treinos-6431a.firebaseapp.com",
   projectId: "treinos-6431a",
   storageBucket: "treinos-6431a.firebasestorage.app",
   messagingSenderId: "307973398713",

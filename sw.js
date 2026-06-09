@@ -1,5 +1,5 @@
 // Service worker: online busca a versão mais nova; offline usa o cache de reserva
-const CACHE = "treinos-v6";
+const CACHE = "treinos-v7";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon.png"];
 
 self.addEventListener("install", e => {
@@ -16,6 +16,8 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   const req = e.request;
+  // Não interceptar o handler de autenticação do Firebase (proxy do login).
+  if (new URL(req.url).pathname.startsWith("/__/")) return;
   const isHTML = req.mode === "navigate" ||
     (req.headers.get("accept") || "").includes("text/html");
 

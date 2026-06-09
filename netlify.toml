@@ -1,0 +1,16 @@
+# Proxy do handler de autenticação do Firebase para o MESMO domínio do app.
+# Isso faz o login com Google funcionar no PWA standalone do iOS (evita o
+# bloqueio de armazenamento entre domínios do Safari/ITP).
+# Requer que authDomain no app seja "treinos-caio.netlify.app".
+
+[[redirects]]
+  from = "/__/auth/*"
+  to = "https://treinos-6431a.firebaseapp.com/__/auth/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/__/firebase/*"
+  to = "https://treinos-6431a.firebaseapp.com/__/firebase/:splat"
+  status = 200
+  force = true
