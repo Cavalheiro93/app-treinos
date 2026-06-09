@@ -88,6 +88,9 @@
   .ex-prog.done{color:var(--ok); border-color:var(--ok); background:rgba(57,217,138,.12)}
   .ex-chev{flex:none; color:var(--muted); font-size:16px; transition:transform .15s}
   .ex.open .ex-chev{transform:rotate(90deg)}
+  .ex-yt{flex:none; display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:9px; text-decoration:none}
+  .ex-yt:active{background:var(--card2)}
+  .ex-yt svg{width:22px; height:22px; display:block}
   .ex-sets{padding:0 14px 14px}
   .set-row{display:grid; grid-template-columns:64px 1fr 1fr 44px; gap:8px; align-items:center; margin-bottom:8px}
   .set-row input{padding:10px; text-align:center}
@@ -223,8 +226,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "1.8";
-const APP_BUILD = "2026-06-09 · descanso só por exercício";
+const APP_VERSION = "1.9";
+const APP_BUILD = "2026-06-09 · atalho YouTube por exercício";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -374,6 +377,9 @@ function renderSessaoAtiva(v){
           <b>${esc(it.nome)}</b>
           <span class="target">meta: ${esc(it.series||'-')}×${esc(it.reps||'-')}${it.carga?` · ${esc(it.carga)}`:''}${it.descanso?` · 💤 ${it.descanso}s`:''}</span>
         </div>
+        <a class="ex-yt" href="https://www.youtube.com/results?search_query=${encodeURIComponent(it.nome + ' execução')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Ver execução no YouTube" aria-label="Ver execução no YouTube">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="#ff0000"/><path d="M10 8.5l6 3.5-6 3.5z" fill="#fff"/></svg>
+        </a>
         <span class="ex-prog ${allDone?'done':''}">${allDone?'✓ ':''}${feitas}/${it.sets.length}</span>
         <span class="ex-chev">▸</span>
       </div>`;
