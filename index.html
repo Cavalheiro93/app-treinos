@@ -226,8 +226,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.2";
-const APP_BUILD = "2026-06-09 · modo de som: misturar com a música";
+const APP_VERSION = "2.3";
+const APP_BUILD = "2026-06-09 · corrige música parar ao abrir o app";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -827,12 +827,14 @@ function ensureAudio(){
   }catch(e){}
   return audioCtx;
 }
-/* Modo de som (cfg.somModo): "bg" = alarme em 2º plano (interrompe a música,
-   toca bloqueado); "mix" = toca junto com a música, abaixando-a só no apito
-   (ducking), porém só com o app aberto/tela ligada. Trade-off do iOS. */
+/* Modo de som (cfg.somModo): "bg" = alarme em 2º plano (usa "auto": só assume a
+   saída de som quando o áudio realmente toca, durante o descanso — NÃO rouba a
+   música ao abrir o app); "mix" = "transient" (ducking): toca junto com a música,
+   abaixando-a só no apito, com o app aberto/tela ligada. Trade-off do iOS.
+   Importante: NÃO usar "playback" eagerly — isso interrompe a música já na abertura. */
 function aplicarAudioSession(){
   if(!("audioSession" in navigator)) return;
-  try{ navigator.audioSession.type = (cfg.somModo==="mix") ? "transient" : "playback"; }catch(e){}
+  try{ navigator.audioSession.type = (cfg.somModo==="mix") ? "transient" : "auto"; }catch(e){}
 }
 /* Loop só de apitos (modo música): a música abaixa apenas enquanto toca. */
 let beepLoopUrl=null;
