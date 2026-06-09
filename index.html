@@ -226,8 +226,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.4";
-const APP_BUILD = "2026-06-09 · modo música (auto) padrão; alarme 2º plano (playback)";
+const APP_VERSION = "2.5";
+const APP_BUILD = "2026-06-09 · destrave de áudio não interrompe mais a música";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -840,6 +840,9 @@ function aplicarAudioSession(){
 // "Destrava" o áudio no iOS na 1ª interação (Web Audio + um play curto)
 function unlockAudio(){
   ensureAudio();
+  // destrava sempre em "auto" (mixável) p/ o blip NÃO interromper a música;
+  // o modo real ("playback" no bg) só é aplicado na hora do descanso.
+  if("audioSession" in navigator){ try{ navigator.audioSession.type="auto"; }catch(e){} }
   if(!mediaReady && timerAudio){
     try{
       const u=wavBlobUrl(buildTimerWav(1,0));   // 1s de silêncio
