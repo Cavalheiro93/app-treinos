@@ -226,8 +226,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.1";
-const APP_BUILD = "2026-06-09 · login Google no PWA (proxy auth)";
+const APP_VERSION = "2.2";
+const APP_BUILD = "2026-06-09 · modo de som: misturar com a música";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -827,9 +827,30 @@ function ensureAudio(){
   }catch(e){}
   return audioCtx;
 }
+/* Modo de som (cfg.somModo): "bg" = alarme em 2º plano (interrompe a música,
+   toca bloqueado); "mix" = toca junto com a música, abaixando-a só no apito
+   (ducking), porém só com o app aberto/tela ligada. Trade-off do iOS. */
+function aplicarAudioSession(){
+  if(!("audioSession" in navigator)) return;
+  try{ navigator.audioSession.type = (cfg.somModo==="mix") ? "transient" : "playback"; }catch(e){}
+}
+/* Loop só de apitos (modo música): a música abaixa apenas enquanto toca. */
+let beepLoopUrl=null;
+function tocarBeepLoop(){
+  if(!timerAudio) return false;
+  try{
+    if(!beepLoopUrl) beepLoopUrl = wavBlobUrl(buildTimerWav(0, 4));
+    if(!beepLoopUrl) return false;
+    timerAudio.muted=false; timerAudio.volume=1; timerAudio.loop=true;
+    timerAudio.src=beepLoopUrl; timerAudio.currentTime=0;
+    const p=timerAudio.play(); if(p&&p.catch) p.catch(()=>startOscAlarm());
+    return true;
+  }catch(e){ return false; }
+}
 // "Destrava" o áudio no iOS na 1ª interação (Web Audio + um play curto)
 function unlockAudio(){
   ensureAudio();
+  aplicarAudioSession();
   if(!mediaReady && timerAudio){
     try{
       const u=wavBlobUrl(buildTimerWav(1,0));   // 1s de silêncio
@@ -851,6 +872,7 @@ document.addEventListener("click", unlockAudio, {once:true});
    hora certa, mesmo com a tela bloqueada. */
 function armAudioTimer(secs){
   if(!timerAudio) return;
+  if(cfg.somModo==="mix") return;   // modo música: nada toca durante a contagem (música livre)
   try{
     if(audioUrl){ try{URL.revokeObjectURL(audioUrl);}catch(e){} audioUrl=null; }
     audioUrl=wavBlobUrl(buildTimerWav(Math.max(0,secs), ALARM_TAIL));
@@ -862,7 +884,7 @@ function armAudioTimer(secs){
 }
 function stopAudioTimer(){
   if(!timerAudio) return;
-  try{ timerAudio.pause(); timerAudio.currentTime=0; }catch(e){}
+  try{ timerAudio.pause(); timerAudio.currentTime=0; timerAudio.loop=false; }catch(e){}
   if(audioUrl){ try{URL.revokeObjectURL(audioUrl);}catch(e){} audioUrl=null; }
 }
 
@@ -897,8 +919,14 @@ function onAlarmReached(){
     navigator.vibrate([200,100,200]);
     alarmVibInt=setInterval(()=>{ if(navigator.vibrate) navigator.vibrate([200,100,200]); },1200);
   }
-  // rede de segurança: se o áudio não estiver tocando, garante som via Web Audio
-  if(!timerAudio || timerAudio.paused || timerAudio.ended) startOscAlarm();
+  aplicarAudioSession();
+  if(cfg.somModo==="mix"){
+    // modo música: toca o loop de apitos agora (música abaixa só aqui)
+    if(!tocarBeepLoop()) startOscAlarm();
+  } else {
+    // modo 2º plano: o som já vem da faixa contínua; só garante se parou
+    if(!timerAudio || timerAudio.paused || timerAudio.ended) startOscAlarm();
+  }
   updateMediaSession();
 }
 function stopAlarm(){
@@ -994,7 +1022,8 @@ window.startTimer = (secs)=>{
   stopTimer();
   timerTotal=secs; timerRem=secs; timerEnd=Date.now()+secs*1000;
   ensureAudio();
-  armAudioTimer(secs);   // áudio = silêncio(secs)+apitos; toca sozinho mesmo bloqueado
+  aplicarAudioSession();
+  armAudioTimer(secs);   // bg: silêncio(secs)+apitos toca sozinho; mix: nada até o apito
   setupMediaSession();
   updateTimerDisplay();
   updateMediaSession();
@@ -1039,6 +1068,9 @@ $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 /* ===================== Config ===================== */
 $("#btnConfig").addEventListener("click", ()=>{
   openModal(`<h2>Configurações</h2>
+    <label>Som durante o treino</label>
+    <div id="somBox">${somBoxHtml()}</div>
+    <hr>
     <label>Sincronização na nuvem</label>
     <div id="syncBox">${syncBoxHtml()}</div>
     <hr>
@@ -1050,6 +1082,26 @@ $("#btnConfig").addEventListener("click", ()=>{
       <b>Versão ${APP_VERSION}</b> · ${esc(APP_BUILD)}
     </p>`);
 });
+function somBoxHtml(){
+  const mix = (cfg.somModo==="mix");
+  const apiOk = ("audioSession" in navigator);
+  return `<p class="muted" style="font-size:13px; line-height:1.5; margin:0 0 8px">
+      Modo atual: <b style="color:var(--txt)">${mix?"🎵 Misturar com a música":"🔔 Alarme em 2º plano"}</b><br>
+      ${mix
+        ? "A música continua tocando e abaixa só no apito. Funciona com o app aberto (a tela fica ligada no descanso); não toca com a tela bloqueada."
+        : "O alarme toca mesmo com a tela bloqueada, mas interrompe a música de outros apps."}
+    </p>
+    <button class="btn-ghost full" onclick="window._toggleSom()">Mudar para ${mix?"🔔 Alarme em 2º plano":"🎵 Misturar com a música"}</button>
+    ${apiOk?"":`<p class="muted" style="font-size:11px; margin-top:6px">Obs: este navegador pode não suportar misturar com a música (recurso do Safari iOS 16.4+).</p>`}`;
+}
+function updateSomUI(){ const b=$("#somBox"); if(b) b.innerHTML = somBoxHtml(); }
+window._toggleSom = ()=>{
+  cfg.somModo = (cfg.somModo==="mix") ? "bg" : "mix";
+  salvarCfg();
+  aplicarAudioSession();
+  updateSomUI();
+  toast(cfg.somModo==="mix" ? "Modo música 🎵 (música continua)" : "Modo alarme em 2º plano 🔔");
+};
 /* Limpa service worker + caches e recarrega buscando da rede. Útil p/ confirmar
    que a versão nova realmente chegou (PWA no iOS costuma servir cache antigo). */
 window._forcarAtualizar = async ()=>{
@@ -1195,6 +1247,7 @@ window._syncBaixar = ()=>{
 
 /* ===================== Init ===================== */
 { const vb=$("#verBadge"); if(vb) vb.textContent = "v"+APP_VERSION; }
+aplicarAudioSession();
 go("treinar");
 carregarFirebase().then(fbInit);
 

@@ -1,5 +1,5 @@
 // Service worker: online busca a versão mais nova; offline usa o cache de reserva
-const CACHE = "treinos-v7";
+const CACHE = "treinos-v8";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon.png"];
 
 self.addEventListener("install", e => {
