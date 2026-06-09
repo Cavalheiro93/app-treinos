@@ -226,8 +226,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.3";
-const APP_BUILD = "2026-06-09 · corrige música parar ao abrir o app";
+const APP_VERSION = "2.4";
+const APP_BUILD = "2026-06-09 · modo música (auto) padrão; alarme 2º plano (playback)";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -827,32 +827,19 @@ function ensureAudio(){
   }catch(e){}
   return audioCtx;
 }
-/* Modo de som (cfg.somModo): "bg" = alarme em 2º plano (usa "auto": só assume a
-   saída de som quando o áudio realmente toca, durante o descanso — NÃO rouba a
-   música ao abrir o app); "mix" = "transient" (ducking): toca junto com a música,
-   abaixando-a só no apito, com o app aberto/tela ligada. Trade-off do iOS.
-   Importante: NÃO usar "playback" eagerly — isso interrompe a música já na abertura. */
+/* Modo de som (cfg.somModo): "mix" (padrão) usa "auto" — no iPhone isso MISTURA
+   com a música de outros apps (o alarme toca por cima), com o app aberto/tela
+   ligada; não toca com a tela bloqueada. "bg" usa "playback" — interrompe a
+   música, mas é a melhor chance de tocar com a tela bloqueada. A sessão só é
+   aplicada na HORA de tocar (armAudioTimer), nunca eager, p/ não roubar a
+   música ao abrir o app. */
 function aplicarAudioSession(){
   if(!("audioSession" in navigator)) return;
-  try{ navigator.audioSession.type = (cfg.somModo==="mix") ? "transient" : "auto"; }catch(e){}
-}
-/* Loop só de apitos (modo música): a música abaixa apenas enquanto toca. */
-let beepLoopUrl=null;
-function tocarBeepLoop(){
-  if(!timerAudio) return false;
-  try{
-    if(!beepLoopUrl) beepLoopUrl = wavBlobUrl(buildTimerWav(0, 4));
-    if(!beepLoopUrl) return false;
-    timerAudio.muted=false; timerAudio.volume=1; timerAudio.loop=true;
-    timerAudio.src=beepLoopUrl; timerAudio.currentTime=0;
-    const p=timerAudio.play(); if(p&&p.catch) p.catch(()=>startOscAlarm());
-    return true;
-  }catch(e){ return false; }
+  try{ navigator.audioSession.type = (cfg.somModo==="bg") ? "playback" : "auto"; }catch(e){}
 }
 // "Destrava" o áudio no iOS na 1ª interação (Web Audio + um play curto)
 function unlockAudio(){
   ensureAudio();
-  aplicarAudioSession();
   if(!mediaReady && timerAudio){
     try{
       const u=wavBlobUrl(buildTimerWav(1,0));   // 1s de silêncio
@@ -874,8 +861,8 @@ document.addEventListener("click", unlockAudio, {once:true});
    hora certa, mesmo com a tela bloqueada. */
 function armAudioTimer(secs){
   if(!timerAudio) return;
-  if(cfg.somModo==="mix") return;   // modo música: nada toca durante a contagem (música livre)
   try{
+    aplicarAudioSession();   // bg→"playback" (interrompe, toca bloqueado); mix→"auto" (mistura)
     if(audioUrl){ try{URL.revokeObjectURL(audioUrl);}catch(e){} audioUrl=null; }
     audioUrl=wavBlobUrl(buildTimerWav(Math.max(0,secs), ALARM_TAIL));
     if(!audioUrl) return;
@@ -921,14 +908,8 @@ function onAlarmReached(){
     navigator.vibrate([200,100,200]);
     alarmVibInt=setInterval(()=>{ if(navigator.vibrate) navigator.vibrate([200,100,200]); },1200);
   }
-  aplicarAudioSession();
-  if(cfg.somModo==="mix"){
-    // modo música: toca o loop de apitos agora (música abaixa só aqui)
-    if(!tocarBeepLoop()) startOscAlarm();
-  } else {
-    // modo 2º plano: o som já vem da faixa contínua; só garante se parou
-    if(!timerAudio || timerAudio.paused || timerAudio.ended) startOscAlarm();
-  }
+  // o som já vem da faixa contínua armada no início; só garante se ela parou
+  if(!timerAudio || timerAudio.paused || timerAudio.ended) startOscAlarm();
   updateMediaSession();
 }
 function stopAlarm(){
@@ -1024,8 +1005,7 @@ window.startTimer = (secs)=>{
   stopTimer();
   timerTotal=secs; timerRem=secs; timerEnd=Date.now()+secs*1000;
   ensureAudio();
-  aplicarAudioSession();
-  armAudioTimer(secs);   // bg: silêncio(secs)+apitos toca sozinho; mix: nada até o apito
+  armAudioTimer(secs);   // aplica a sessão de áudio e toca a faixa (silêncio+apitos)
   setupMediaSession();
   updateTimerDisplay();
   updateMediaSession();
@@ -1090,17 +1070,17 @@ function somBoxHtml(){
   return `<p class="muted" style="font-size:13px; line-height:1.5; margin:0 0 8px">
       Modo atual: <b style="color:var(--txt)">${mix?"🎵 Misturar com a música":"🔔 Alarme em 2º plano"}</b><br>
       ${mix
-        ? "A música continua tocando e abaixa só no apito. Funciona com o app aberto (a tela fica ligada no descanso); não toca com a tela bloqueada."
-        : "O alarme toca mesmo com a tela bloqueada, mas interrompe a música de outros apps."}
+        ? "A música continua tocando e o alarme toca por cima dela. Funciona com o app aberto (a tela fica ligada no descanso); não toca com a tela bloqueada."
+        : "O alarme tenta tocar mesmo com a tela bloqueada, mas interrompe a música de outros apps."}
     </p>
     <button class="btn-ghost full" onclick="window._toggleSom()">Mudar para ${mix?"🔔 Alarme em 2º plano":"🎵 Misturar com a música"}</button>
     ${apiOk?"":`<p class="muted" style="font-size:11px; margin-top:6px">Obs: este navegador pode não suportar misturar com a música (recurso do Safari iOS 16.4+).</p>`}`;
 }
 function updateSomUI(){ const b=$("#somBox"); if(b) b.innerHTML = somBoxHtml(); }
 window._toggleSom = ()=>{
+  // não aplica a sessão aqui (só no próximo descanso), p/ não mexer na música agora
   cfg.somModo = (cfg.somModo==="mix") ? "bg" : "mix";
   salvarCfg();
-  aplicarAudioSession();
   updateSomUI();
   toast(cfg.somModo==="mix" ? "Modo música 🎵 (música continua)" : "Modo alarme em 2º plano 🔔");
 };
@@ -1249,7 +1229,7 @@ window._syncBaixar = ()=>{
 
 /* ===================== Init ===================== */
 { const vb=$("#verBadge"); if(vb) vb.textContent = "v"+APP_VERSION; }
-aplicarAudioSession();
+if(cfg.somModo!=="bg" && cfg.somModo!=="mix") cfg.somModo="mix";   // padrão: misturar com a música
 go("treinar");
 carregarFirebase().then(fbInit);
 
