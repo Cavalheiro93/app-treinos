@@ -134,11 +134,11 @@
     display:none; align-items:center; justify-content:center; font-size:24px}
   .fab-timer.show{display:flex}
 
-  .ex-edit-row{display:grid; grid-template-columns:1fr 56px 56px 64px 34px; gap:6px; align-items:center; margin-bottom:8px}
-  .ex-edit-row input{padding:9px 6px; font-size:14px; text-align:center}
+  .ex-edit-row{display:grid; grid-template-columns:1fr 42px 50px 50px 50px 26px; gap:5px; align-items:center; margin-bottom:8px}
+  .ex-edit-row input{padding:9px 4px; font-size:14px; text-align:center}
   .ex-edit-row input.nome{text-align:left}
   .ex-edit-row .del{background:none; border:none; color:var(--danger); font-size:20px; padding:0}
-  .edit-head{display:grid; grid-template-columns:1fr 56px 56px 64px 34px; gap:6px; margin-bottom:5px}
+  .edit-head{display:grid; grid-template-columns:1fr 42px 50px 50px 50px 26px; gap:5px; margin-bottom:5px}
   .edit-head span{font-size:10px; color:var(--muted); text-align:center; font-weight:700; text-transform:uppercase}
 
   .sess-item{padding:14px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); margin-bottom:10px}
@@ -223,8 +223,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "1.6";
-const APP_BUILD = "2026-06-08 · alarme gravado";
+const APP_VERSION = "1.7";
+const APP_BUILD = "2026-06-09 · descanso por exercício";
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
 const KEY_CFG    = "gym_config_v1";
@@ -339,8 +339,9 @@ window.iniciarTreino = function(fichaId){
     itens: f.exercicios.map(ex=>{
       const nSeries = parseInt(ex.series)||1;
       const sugCarga = ultimaCargaExercicio(ex.nome) || ex.carga || "";
+      const desc = parseInt(String(ex.descanso).replace(/\D/g,"")) || cfg.descanso;
       return {
-        nome:ex.nome, series:ex.series, reps:ex.reps, carga:ex.carga,
+        nome:ex.nome, series:ex.series, reps:ex.reps, carga:ex.carga, descanso:desc,
         sets: Array.from({length:nSeries}, ()=>({carga:sugCarga, reps:ex.reps||"", feito:false, tag:""}))
       };
     })
@@ -370,7 +371,7 @@ function renderSessaoAtiva(v){
       <div class="ex-head" onclick="toggleEx(${ei})">
         <div class="ex-head-main">
           <b>${esc(it.nome)}</b>
-          <span class="target">meta: ${esc(it.series||'-')}×${esc(it.reps||'-')}${it.carga?` · ${esc(it.carga)}`:''}</span>
+          <span class="target">meta: ${esc(it.series||'-')}×${esc(it.reps||'-')}${it.carga?` · ${esc(it.carga)}`:''}${it.descanso?` · 💤 ${it.descanso}s`:''}</span>
         </div>
         <span class="ex-prog ${allDone?'done':''}">${allDone?'✓ ':''}${feitas}/${it.sets.length}</span>
         <span class="ex-chev">▸</span>
@@ -393,7 +394,7 @@ function renderSessaoAtiva(v){
       html += `<div class="row" style="margin-top:4px">
           <button class="btn-ghost btn-sm" onclick="addSet(${ei})">+ série</button>
           <div class="spacer"></div>
-          <button class="btn-ghost btn-sm" onclick="abrirTimer()">⏱️ Descanso</button>
+          <button class="btn-ghost btn-sm" onclick="abrirTimer(${it.descanso||0})">⏱️ Descanso${it.descanso?` ${it.descanso}s`:''}</button>
         </div>
       </div>`;
     }
@@ -433,7 +434,7 @@ window.toggleSet = (ei,si)=>{
   const set = sessaoAtiva.itens[ei].sets[si];
   set.feito = !set.feito;
   if(set.feito && navigator.vibrate) navigator.vibrate(15);
-  if(set.feito) abrirTimer(); // auto-inicia descanso ao concluir série
+  if(set.feito) abrirTimer(sessaoAtiva.itens[ei].descanso); // auto-inicia descanso do exercício
   renderTreinar();
 };
 window.addSet = (ei)=>{
@@ -498,7 +499,7 @@ function renderFichas(){
 
 window.editarFicha = function(fichaId){
   const editing = fichas.find(x=>x.id===fichaId);
-  const f = editing ? JSON.parse(JSON.stringify(editing)) : { id:uid(), nome:"", exercicios:[{nome:"",series:"3",reps:"12",carga:""}] };
+  const f = editing ? JSON.parse(JSON.stringify(editing)) : { id:uid(), nome:"", exercicios:[{nome:"",series:"3",reps:"12",carga:"",descanso:""}] };
 
   function rowsHtml(){
     return f.exercicios.map((ex,i)=>`<div class="ex-edit-row">
@@ -506,12 +507,13 @@ window.editarFicha = function(fichaId){
       <input inputmode="numeric" placeholder="Séries" value="${esc(ex.series)}" oninput="window._ef.exercicios[${i}].series=this.value">
       <input placeholder="Reps" value="${esc(ex.reps)}" oninput="window._ef.exercicios[${i}].reps=this.value">
       <input inputmode="decimal" placeholder="Carga" value="${esc(ex.carga)}" oninput="window._ef.exercicios[${i}].carga=this.value">
+      <input inputmode="numeric" placeholder="${cfg.descanso}" value="${esc(ex.descanso)}" oninput="window._ef.exercicios[${i}].descanso=this.value" title="Descanso em segundos">
       <button class="del" onclick="window._efDel(${i})">✕</button>
     </div>`).join("");
   }
   window._ef = f;
   window._efDel = (i)=>{ f.exercicios.splice(i,1); $("#efRows").innerHTML = rowsHtml(); };
-  window._efAdd = ()=>{ f.exercicios.push({nome:"",series:"3",reps:"12",carga:""}); $("#efRows").innerHTML = rowsHtml(); };
+  window._efAdd = ()=>{ f.exercicios.push({nome:"",series:"3",reps:"12",carga:"",descanso:""}); $("#efRows").innerHTML = rowsHtml(); };
   window._efSalvar = ()=>{
     f.nome = (f.nome||"").trim();
     f.exercicios = f.exercicios.filter(e=> (e.nome||"").trim());
@@ -529,7 +531,7 @@ window.editarFicha = function(fichaId){
     <div class="field"><label>Nome (ex: Treino A — Peito/Tríceps)</label>
       <input id="efNome" value="${esc(f.nome)}" oninput="window._ef.nome=this.value" placeholder="Treino A"></div>
     <label>Exercícios</label>
-    <div class="edit-head"><span>Nome</span><span>Séries</span><span>Reps</span><span>Carga</span><span></span></div>
+    <div class="edit-head"><span>Nome</span><span>Sér.</span><span>Reps</span><span>Carga</span><span>Desc(s)</span><span></span></div>
     <div id="efRows">${rowsHtml()}</div>
     <button class="btn-ghost btn-sm" onclick="window._efAdd()" style="margin:4px 0 14px">+ exercício</button>
     <div class="row"><button class="btn full" onclick="window._efSalvar()">Salvar ficha</button></div>
@@ -541,8 +543,8 @@ window.editarFicha = function(fichaId){
 window.abrirImportCSV = ()=>{
   openModal(`<h2>Importar treino (CSV)</h2>
     <p class="muted" style="line-height:1.5">Monte a planilha no PC com estas colunas e salve como <b>CSV</b>:</p>
-    <p><code>treino, exercicio, series, repeticoes, carga</code></p>
-    <p class="muted">Cada linha = 1 exercício. Linhas com o mesmo "treino" viram a mesma ficha. Aceita separador vírgula <b>ou</b> ponto-e-vírgula.</p>
+    <p><code>treino, exercicio, series, repeticoes, carga, descanso</code></p>
+    <p class="muted">Cada linha = 1 exercício. A coluna <b>descanso</b> (em segundos, ex: 90) é opcional — sem ela, usa o padrão. Linhas com o mesmo "treino" viram a mesma ficha. Aceita separador vírgula <b>ou</b> ponto-e-vírgula.</p>
     <input type="file" id="csvFile" accept=".csv,text/csv" style="margin:10px 0">
     <div class="row"><button class="btn-ghost full" onclick="closeModal()">Cancelar</button></div>`);
   $("#csvFile").addEventListener("change", e=>{
@@ -587,6 +589,7 @@ function importarCSV(text){
       series: col(["series","séries","sets"]),
       reps:   col(["repeticoes","repetições","reps","rep"]),
       carga:  col(["carga","peso","kg","carga(kg)"]),
+      desc:   col(["descanso","descanso(s)","rest","intervalo","pausa"]),
     };
     if(ci.ex<0){ toast("Falta a coluna 'exercicio'"); return; }
     const map = {};
@@ -597,11 +600,13 @@ function importarCSV(text){
       if(!nomeEx) continue;
       const treino = (ci.treino>=0 ? row[ci.treino] : "Importado").trim() || "Importado";
       if(!map[treino]) map[treino]=[];
+      const descRaw = ci.desc>=0 ? String(row[ci.desc]||"").replace(/\D/g,"") : "";
       map[treino].push({
         nome:nomeEx,
         series:(ci.series>=0?row[ci.series]:"")||"3",
         reps:(ci.reps>=0?row[ci.reps]:"")||"12",
         carga:(ci.carga>=0?row[ci.carga]:"")||"",
+        descanso:descRaw,
       });
       count++;
     }
@@ -625,10 +630,10 @@ function baixarArquivo(nome, conteudo, tipo="text/csv;charset=utf-8"){
 }
 window.exportarCSV = ()=>{
   if(fichas.length===0){ toast("Sem fichas para exportar"); return; }
-  let csv = "treino,exercicio,series,repeticoes,carga\n";
+  let csv = "treino,exercicio,series,repeticoes,carga,descanso\n";
   fichas.forEach(f=> f.exercicios.forEach(ex=>{
     const q = s => `"${String(s??"").replace(/"/g,'""')}"`;
-    csv += [q(f.nome),q(ex.nome),q(ex.series),q(ex.reps),q(ex.carga)].join(",")+"\n";
+    csv += [q(f.nome),q(ex.nome),q(ex.series),q(ex.reps),q(ex.carga),q(ex.descanso)].join(",")+"\n";
   }));
   baixarArquivo("minhas-fichas.csv", csv);
   toast("CSV exportado ✓");
@@ -939,10 +944,10 @@ function renderTimerModal(){
     </div>
     <p class="muted" style="text-align:center; margin-top:10px">Descanso padrão: ${cfg.descanso}s · 🔔 o alarme toca até você tocar em <b>Fechar</b> e tenta soar mesmo com a tela bloqueada</p>`;
 }
-window.abrirTimer = ()=>{
+window.abrirTimer = (secs)=>{
   $("#modalBg").classList.add("show");
   renderTimerModal();
-  if(!timerInt) startTimer(cfg.descanso);
+  if(!timerInt) startTimer(parseInt(secs)||cfg.descanso);
 };
 /* Mantém a tela ligada enquanto o descanso roda (Wake Lock) */
 let wakeLock = null;
@@ -1011,7 +1016,7 @@ $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 /* ===================== Config ===================== */
 $("#btnConfig").addEventListener("click", ()=>{
   openModal(`<h2>Configurações</h2>
-    <div class="field"><label>Tempo de descanso padrão (segundos)</label>
+    <div class="field"><label>Descanso padrão (segundos) — usado quando o exercício não define</label>
       <input type="number" inputmode="numeric" id="cfgDesc" value="${cfg.descanso}"></div>
     <button class="btn full" onclick="window._salvarCfg()">Salvar</button>
     <hr>
