@@ -226,20 +226,32 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "1.9";
-const APP_BUILD = "2026-06-09 · atalho YouTube por exercício";
+const APP_VERSION = "2.0";
+const APP_BUILD = "2026-06-09 · sincronização na nuvem (Firebase)";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
 const KEY_CFG    = "gym_config_v1";
+const KEY_UPDATED= "gym_updated_v1";   // carimbo da última alteração local (p/ sync)
+
+/* Config pública do Firebase (seguro embutir no cliente; segurança via Rules+login) */
+const FB_CONFIG = {
+  apiKey: "AIzaSyCs7jkpv4wZ6f556HGAEtLPh3J3mmt_A2I",
+  authDomain: "treinos-6431a.firebaseapp.com",
+  projectId: "treinos-6431a",
+  storageBucket: "treinos-6431a.firebasestorage.app",
+  messagingSenderId: "307973398713",
+  appId: "1:307973398713:web:be68ce49ab00f6d6627b68"
+};
 
 let fichas  = DB.get(KEY_FICHAS, []);
 let sessoes = DB.get(KEY_SESS, []);
 let cfg     = DB.get(KEY_CFG, { descanso:90 });
+let localUpdatedAt = DB.get(KEY_UPDATED, 0);
 
-function salvarFichas(){ DB.set(KEY_FICHAS, fichas) }
-function salvarSessoes(){ DB.set(KEY_SESS, sessoes) }
-function salvarCfg(){ DB.set(KEY_CFG, cfg) }
+function salvarFichas(){ DB.set(KEY_FICHAS, fichas); touchAndPush(); }
+function salvarSessoes(){ DB.set(KEY_SESS, sessoes); touchAndPush(); }
+function salvarCfg(){ DB.set(KEY_CFG, cfg); touchAndPush(); }
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7) }
 
@@ -277,6 +289,7 @@ const titles = {
   historico:["Histórico","Sua evolução"],
 };
 function go(tab){
+  currentTab = tab;
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   $("#view-"+tab).classList.add("active");
   document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===tab));
@@ -1023,6 +1036,9 @@ $("#fabTimer").addEventListener("click", ()=>abrirTimer());
 /* ===================== Config ===================== */
 $("#btnConfig").addEventListener("click", ()=>{
   openModal(`<h2>Configurações</h2>
+    <label>Sincronização na nuvem</label>
+    <div id="syncBox">${syncBoxHtml()}</div>
+    <hr>
     <p class="muted" style="line-height:1.5">O <b>descanso é definido por exercício</b>, na ficha. Edite a ficha (aba Fichas) para ajustar o tempo de cada exercício — ele fica registrado e usado automaticamente no treino.</p>
     <button class="btn-ghost full" onclick="window._forcarAtualizar()">🔄 Forçar atualização (limpar cache)</button>
     <p class="muted" style="font-size:12px; line-height:1.6; margin-top:12px">
@@ -1048,9 +1064,136 @@ window._forcarAtualizar = async ()=>{
   location.replace(u.toString());
 };
 
+/* ===================== Sincronização (Firebase) =====================
+   Opt-in: só age quando você entra com o Google. Estratégia "quem salvou por
+   último vence" (carimbo updatedAt no documento users/{uid}), com botões
+   manuais de Enviar/Baixar como rede de segurança. App segue 100% offline
+   se o Firebase não carregar (ex: sem internet). */
+let currentTab = "treinar";
+let fbReady=false, fbUser=null, fbAuth=null, fbDb=null, fbUnsub=null;
+let applyingRemote=false, pushTimer=null;
+const deviceName = (navigator.platform || "web");
+
+function carregarFirebase(){
+  return new Promise(resolve=>{
+    if(window.firebase) return resolve();
+    const v="10.12.2";
+    const urls=[
+      `https://www.gstatic.com/firebasejs/${v}/firebase-app-compat.js`,
+      `https://www.gstatic.com/firebasejs/${v}/firebase-auth-compat.js`,
+      `https://www.gstatic.com/firebasejs/${v}/firebase-firestore-compat.js`,
+    ];
+    let i=0;
+    const next=()=>{
+      if(i>=urls.length) return resolve();
+      const s=document.createElement("script");
+      s.src=urls[i++]; s.onload=next; s.onerror=()=>resolve();
+      document.head.appendChild(s);
+    };
+    next();
+  });
+}
+function fbInit(){
+  if(!window.firebase) return;   // offline / SDK não carregou → segue local
+  try{
+    firebase.initializeApp(FB_CONFIG);
+    fbAuth = firebase.auth();
+    fbDb   = firebase.firestore();
+    fbReady = true;
+    fbAuth.onAuthStateChanged(u=>{
+      fbUser = u;
+      updateSyncUI();
+      if(u){ attachSnapshot(); }
+      else if(fbUnsub){ fbUnsub(); fbUnsub=null; }
+    });
+    fbAuth.getRedirectResult().catch(()=>{});
+  }catch(e){}
+}
+function fbDocRef(){ return fbDb.collection("users").doc(fbUser.uid); }
+
+function touchAndPush(){
+  if(applyingRemote) return;          // alteração veio da nuvem → não reenvia
+  localUpdatedAt = Date.now();
+  DB.set(KEY_UPDATED, localUpdatedAt);
+  schedulePush();
+}
+function schedulePush(){
+  if(!fbReady || !fbUser) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(cloudPush, 800);
+}
+function cloudPush(){
+  if(!fbReady || !fbUser) return;
+  try{ fbDocRef().set({ fichas, sessoes, cfg, updatedAt:localUpdatedAt, device:deviceName }, {merge:true}); }
+  catch(e){}
+}
+function attachSnapshot(){
+  if(fbUnsub) fbUnsub();
+  try{
+    fbUnsub = fbDocRef().onSnapshot(snap=>{
+      const d = snap.data();
+      if(!d){ cloudPush(); return; }                  // nuvem vazia → envia local
+      const remoteAt = d.updatedAt || 0;
+      if(remoteAt > localUpdatedAt) applyRemote(d, remoteAt);
+      else if(remoteAt < localUpdatedAt) cloudPush();  // local mais novo → garante envio
+    }, ()=>{});
+  }catch(e){}
+}
+function applyRemote(d, remoteAt){
+  applyingRemote = true;
+  if(Array.isArray(d.fichas)){ fichas = d.fichas; DB.set(KEY_FICHAS, fichas); }
+  if(Array.isArray(d.sessoes)){ sessoes = d.sessoes; DB.set(KEY_SESS, sessoes); }
+  if(d.cfg){ cfg = d.cfg; DB.set(KEY_CFG, cfg); }
+  localUpdatedAt = remoteAt; DB.set(KEY_UPDATED, localUpdatedAt);
+  applyingRemote = false;
+  refreshView(); updateSyncUI();
+  toast("Sincronizado ✓");
+}
+function refreshView(){
+  if(currentTab==="treinar") renderTreinar();
+  else if(currentTab==="fichas") renderFichas();
+  else if(currentTab==="historico") renderHistorico();
+}
+function syncBoxHtml(){
+  if(!fbReady){
+    return `<p class="muted" style="font-size:13px; line-height:1.5">Sincronização indisponível agora (sem internet ou serviço não carregou). O app segue funcionando offline.</p>`;
+  }
+  if(!fbUser){
+    return `<button class="btn full" onclick="window._syncEntrar()">Entrar com Google</button>
+      <p class="muted" style="font-size:12px; line-height:1.5; margin-top:8px">Entre com a mesma conta no celular e no PC para suas fichas e histórico sincronizarem entre eles.</p>`;
+  }
+  return `<p class="muted" style="font-size:13px; margin:0 0 8px">Conectado: <b style="color:var(--txt)">${esc(fbUser.email||fbUser.displayName||"conta Google")}</b></p>
+    <div class="row" style="gap:8px">
+      <button class="btn-ghost btn-sm" onclick="window._syncEnviar()">⬆️ Enviar agora</button>
+      <button class="btn-ghost btn-sm" onclick="window._syncBaixar()">⬇️ Baixar agora</button>
+      <div class="spacer"></div>
+      <button class="btn-ghost btn-sm" onclick="window._syncSair()">Sair</button>
+    </div>
+    <p class="muted" style="font-size:11px; line-height:1.5; margin-top:8px">Sincroniza automaticamente. Use <b>Enviar</b>/<b>Baixar</b> se precisar forçar uma direção.</p>`;
+}
+function updateSyncUI(){ const b=$("#syncBox"); if(b) b.innerHTML = syncBoxHtml(); }
+
+window._syncEntrar = ()=>{
+  if(!fbReady){ toast("Sync indisponível offline"); return; }
+  const prov = new firebase.auth.GoogleAuthProvider();
+  const standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone;
+  if(standalone){ fbAuth.signInWithRedirect(prov); }
+  else { fbAuth.signInWithPopup(prov).catch(()=> fbAuth.signInWithRedirect(prov)); }
+};
+window._syncSair = ()=>{ if(fbAuth) fbAuth.signOut().then(updateSyncUI); };
+window._syncEnviar = ()=>{
+  if(!fbReady||!fbUser){ toast("Entre com o Google primeiro"); return; }
+  localUpdatedAt = Date.now(); DB.set(KEY_UPDATED, localUpdatedAt); cloudPush(); toast("Enviado pra nuvem ✓");
+};
+window._syncBaixar = ()=>{
+  if(!fbReady||!fbUser){ toast("Entre com o Google primeiro"); return; }
+  fbDocRef().get().then(s=>{ const d=s.data(); if(d) applyRemote(d, d.updatedAt||Date.now()); else toast("Nada na nuvem ainda"); }).catch(()=>toast("Falha ao baixar"));
+};
+
 /* ===================== Init ===================== */
 { const vb=$("#verBadge"); if(vb) vb.textContent = "v"+APP_VERSION; }
 go("treinar");
+carregarFirebase().then(fbInit);
 
 /* registra service worker p/ funcionar offline (se disponível) */
 if("serviceWorker" in navigator){
