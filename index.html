@@ -226,8 +226,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.6";
-const APP_BUILD = "2026-06-10 · música livre na contagem; alarme abaixa a música (ducking)";
+const APP_VERSION = "2.7";
+const APP_BUILD = "2026-06-10 · trocar exercício no meio do treino (só hoje ou permanente)";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -356,12 +356,12 @@ window.iniciarTreino = function(fichaId){
   if(!f) return;
   sessaoAtiva = {
     fichaId:f.id, fichaNome:f.nome, data:new Date().toISOString(),
-    itens: f.exercicios.map(ex=>{
+    itens: f.exercicios.map((ex,i)=>{
       const nSeries = parseInt(ex.series)||1;
       const sugCarga = ultimaCargaExercicio(ex.nome) || ex.carga || "";
       const desc = parseInt(String(ex.descanso).replace(/\D/g,"")) || DEFAULT_REST;
       return {
-        nome:ex.nome, series:ex.series, reps:ex.reps, carga:ex.carga, descanso:desc,
+        nome:ex.nome, series:ex.series, reps:ex.reps, carga:ex.carga, descanso:desc, fichaIdx:i,
         sets: Array.from({length:nSeries}, ()=>({carga:sugCarga, reps:ex.reps||"", feito:false, tag:""}))
       };
     })
@@ -414,8 +414,9 @@ function renderSessaoAtiva(v){
           <div class="chk ${set.feito?'on':''}" onclick="toggleSet(${ei},${si})">${set.feito?'✓':''}</div>
         </div>`;
       });
-      html += `<div class="row" style="margin-top:4px">
+      html += `<div class="row wrap" style="margin-top:4px">
           <button class="btn-ghost btn-sm" onclick="addSet(${ei})">+ série</button>
+          <button class="btn-ghost btn-sm" onclick="trocarExercicio(${ei})">🔄 Trocar</button>
           <div class="spacer"></div>
           <button class="btn-ghost btn-sm" onclick="abrirTimer(${it.descanso||0})">⏱️ Descanso${it.descanso?` ${it.descanso}s`:''}</button>
         </div>
@@ -465,6 +466,51 @@ window.addSet = (ei)=>{
   const last = it.sets[it.sets.length-1] || {carga:"",reps:it.reps||""};
   it.sets.push({carga:last.carga, reps:last.reps, feito:false, tag:""});
   renderTreinar();
+};
+/* Trocar um exercício no meio do treino (equipamento ocupado etc.).
+   A troca pode valer só hoje (histórico do dia) ou ser salva na ficha. */
+window.trocarExercicio = (ei)=>{
+  const it = sessaoAtiva.itens[ei];
+  openModal(`<h2>Trocar exercício</h2>
+    <p class="muted" style="font-size:13px; margin:0 0 12px">Substituindo: <b style="color:var(--txt)">${esc(it.nome)}</b></p>
+    <div class="field"><label>Novo exercício</label>
+      <input id="swNome" placeholder="Ex: Supino inclinado na máquina"></div>
+    <div class="row">
+      <div class="field" style="flex:1"><label>Reps</label>
+        <input id="swReps" value="${esc(it.reps||'')}" placeholder="${esc(it.reps||'10-12')}"></div>
+      <div class="field" style="flex:1"><label>Descanso (s)</label>
+        <input id="swDesc" inputmode="numeric" value="${esc(it.descanso||DEFAULT_REST)}"></div>
+    </div>
+    <button class="btn full" onclick="window._aplicarTroca(${ei}, false)">Trocar só hoje</button>
+    <button class="btn-ghost full" style="margin-top:10px" onclick="window._aplicarTroca(${ei}, true)">💾 Salvar na ficha (permanente)</button>
+    <button class="btn-ghost full" style="margin-top:10px" onclick="closeModal()">Cancelar</button>`);
+  setTimeout(()=>{ const n=$("#swNome"); if(n) n.focus(); }, 60);
+};
+window._aplicarTroca = (ei, permanente)=>{
+  const it = sessaoAtiva.itens[ei];
+  const nome = ($("#swNome").value||"").trim();
+  if(!nome){ toast("Digite o nome do novo exercício"); return; }
+  const reps = ($("#swReps").value||"").trim();
+  const desc = parseInt(String($("#swDesc").value).replace(/\D/g,"")) || it.descanso || DEFAULT_REST;
+  // atualiza o treino de hoje (vai pro histórico com o novo nome)
+  it.nome = nome; it.reps = reps; it.descanso = desc;
+  // sugere a carga/reps do novo exercício nas séries ainda não feitas
+  const sug = ultimaCargaExercicio(nome) || "";
+  it.sets.forEach(set=>{ if(!set.feito){ set.carga = sug; if(reps) set.reps = reps; } });
+  // se permanente, atualiza também a ficha (sincroniza na nuvem)
+  if(permanente){
+    const f = fichas.find(x=>x.id===sessaoAtiva.fichaId);
+    if(f && it.fichaIdx!=null && f.exercicios[it.fichaIdx]){
+      const fx = f.exercicios[it.fichaIdx];
+      fx.nome = nome; fx.reps = reps; fx.descanso = String(desc);
+      salvarFichas();
+    }else{
+      closeModal(); renderTreinar();
+      toast("Trocado só hoje (não achei na ficha p/ salvar)"); return;
+    }
+  }
+  closeModal(); renderTreinar();
+  toast(permanente ? "Trocado e salvo na ficha ✓" : "Trocado só hoje ✓");
 };
 window.cancelarTreino = ()=>{
   openModal(`<h2>Cancelar treino?</h2><p class="muted">O registro de hoje não será salvo.</p>
