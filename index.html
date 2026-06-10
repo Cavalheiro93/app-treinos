@@ -226,8 +226,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.5";
-const APP_BUILD = "2026-06-09 · destrave de áudio não interrompe mais a música";
+const APP_VERSION = "2.6";
+const APP_BUILD = "2026-06-10 · música livre na contagem; alarme abaixa a música (ducking)";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -864,8 +864,9 @@ document.addEventListener("click", unlockAudio, {once:true});
    hora certa, mesmo com a tela bloqueada. */
 function armAudioTimer(secs){
   if(!timerAudio) return;
+  if(cfg.somModo==="mix") return;   // mix: nada toca durante a contagem (música 100% livre)
   try{
-    aplicarAudioSession();   // bg→"playback" (interrompe, toca bloqueado); mix→"auto" (mistura)
+    aplicarAudioSession();   // bg→"playback" (interrompe, toca bloqueado)
     if(audioUrl){ try{URL.revokeObjectURL(audioUrl);}catch(e){} audioUrl=null; }
     audioUrl=wavBlobUrl(buildTimerWav(Math.max(0,secs), ALARM_TAIL));
     if(!audioUrl) return;
@@ -878,6 +879,21 @@ function stopAudioTimer(){
   if(!timerAudio) return;
   try{ timerAudio.pause(); timerAudio.currentTime=0; timerAudio.loop=false; }catch(e){}
   if(audioUrl){ try{URL.revokeObjectURL(audioUrl);}catch(e){} audioUrl=null; }
+}
+/* Modo música: ao zerar, toca o loop de apitos em "transient" (o iOS ABAIXA a
+   música enquanto o alarme toca e a restaura ao parar). */
+let beepLoopUrl=null;
+function tocarBeepLoop(){
+  if(!timerAudio) return false;
+  try{
+    if("audioSession" in navigator){ try{ navigator.audioSession.type="transient"; }catch(e){} }
+    if(!beepLoopUrl) beepLoopUrl = wavBlobUrl(buildTimerWav(0, 4));
+    if(!beepLoopUrl) return false;
+    timerAudio.muted=false; timerAudio.volume=1; timerAudio.loop=true;
+    timerAudio.src=beepLoopUrl; timerAudio.currentTime=0;
+    const p=timerAudio.play(); if(p&&p.catch) p.catch(()=>startOscAlarm());
+    return true;
+  }catch(e){ return false; }
 }
 
 /* fallback de alarme via Web Audio (se o <audio> for bloqueado) */
@@ -911,8 +927,13 @@ function onAlarmReached(){
     navigator.vibrate([200,100,200]);
     alarmVibInt=setInterval(()=>{ if(navigator.vibrate) navigator.vibrate([200,100,200]); },1200);
   }
-  // o som já vem da faixa contínua armada no início; só garante se ela parou
-  if(!timerAudio || timerAudio.paused || timerAudio.ended) startOscAlarm();
+  if(cfg.somModo==="mix"){
+    // música: nada tocou na contagem; agora entra o alarme abaixando a música
+    if(!tocarBeepLoop()) startOscAlarm();
+  } else {
+    // 2º plano: o som já vem da faixa contínua; só garante se ela parou
+    if(!timerAudio || timerAudio.paused || timerAudio.ended) startOscAlarm();
+  }
   updateMediaSession();
 }
 function stopAlarm(){
@@ -1073,7 +1094,7 @@ function somBoxHtml(){
   return `<p class="muted" style="font-size:13px; line-height:1.5; margin:0 0 8px">
       Modo atual: <b style="color:var(--txt)">${mix?"🎵 Misturar com a música":"🔔 Alarme em 2º plano"}</b><br>
       ${mix
-        ? "A música continua tocando e o alarme toca por cima dela. Funciona com o app aberto (a tela fica ligada no descanso); não toca com a tela bloqueada."
+        ? "A música continua tocando o descanso inteiro e abaixa só no apito do alarme (volta depois). Funciona com o app aberto/tela ligada; não toca com a tela bloqueada."
         : "O alarme tenta tocar mesmo com a tela bloqueada, mas interrompe a música de outros apps."}
     </p>
     <button class="btn-ghost full" onclick="window._toggleSom()">Mudar para ${mix?"🔔 Alarme em 2º plano":"🎵 Misturar com a música"}</button>
