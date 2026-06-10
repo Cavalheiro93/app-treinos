@@ -140,10 +140,18 @@
     display:none; align-items:center; justify-content:center; font-size:24px}
   .fab-timer.show{display:flex}
 
-  .ex-edit-row{display:grid; grid-template-columns:1fr 42px 50px 50px 50px 26px; gap:5px; align-items:center; margin-bottom:8px}
+  .ex-edit{margin-bottom:10px}
+  .ex-edit-row{display:grid; grid-template-columns:1fr 42px 50px 50px 50px 26px; gap:5px; align-items:center; margin-bottom:5px}
   .ex-edit-row input{padding:9px 4px; font-size:14px; text-align:center}
   .ex-edit-row input.nome{text-align:left}
   .ex-edit-row .del{background:none; border:none; color:var(--danger); font-size:20px; padding:0}
+  .ef-tags{display:flex; flex-wrap:wrap; gap:5px; align-items:center; padding-left:2px}
+  .ef-lbl{font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em}
+  .ef-chip{min-width:26px; height:26px; padding:0 4px; border-radius:8px; background:var(--card2);
+    border:1px solid var(--line); color:var(--muted); font-size:12px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none}
+  .ef-chip.aquec{background:rgba(255,176,32,.16); border-color:var(--warn); color:var(--warn)}
+  .ef-chip.prep{background:rgba(79,140,255,.16); border-color:var(--accent); color:var(--accent)}
   .edit-head{display:grid; grid-template-columns:1fr 42px 50px 50px 50px 26px; gap:5px; margin-bottom:5px}
   .edit-head span{font-size:10px; color:var(--muted); text-align:center; font-weight:700; text-transform:uppercase}
 
@@ -400,7 +408,7 @@ window.iniciarTreino = function(fichaId){
       const desc = parseInt(String(ex.descanso).replace(/\D/g,"")) || DEFAULT_REST;
       return {
         nome:ex.nome, series:ex.series, reps:ex.reps, carga:ex.carga, descanso:desc, fichaIdx:i,
-        sets: Array.from({length:nSeries}, ()=>({carga:sugCarga, reps:ex.reps||"", feito:false, tag:""}))
+        sets: Array.from({length:nSeries}, (_,si)=>({carga:sugCarga, reps:ex.reps||"", feito:false, tag:(ex.tags && ex.tags[si]) || ""}))
       };
     })
   };
@@ -619,24 +627,49 @@ function renderFichas(){
 
 window.editarFicha = function(fichaId){
   const editing = fichas.find(x=>x.id===fichaId);
-  const f = editing ? JSON.parse(JSON.stringify(editing)) : { id:uid(), nome:"", exercicios:[{nome:"",series:"3",reps:"12",carga:"",descanso:String(DEFAULT_REST)}] };
+  const f = editing ? JSON.parse(JSON.stringify(editing)) : { id:uid(), nome:"", exercicios:[{nome:"",series:"3",reps:"12",carga:"",descanso:String(DEFAULT_REST),tags:[]}] };
 
+  function tagsHtml(i){
+    const ex = f.exercicios[i];
+    const n = parseInt(ex.series)||1;
+    if(!ex.tags) ex.tags=[];
+    let h = `<div class="ef-tags" id="efTags${i}"><span class="ef-lbl">séries:</span>`;
+    for(let si=0; si<n; si++){
+      const ti = tagInfo(ex.tags[si]||"");
+      h += `<span class="ef-chip ${ti?ti.cls:''}" onclick="window._efTag(${i},${si})" title="Toque: normal → 🔥 → ⚡">${ti?ti.emoji:(si+1)}</span>`;
+    }
+    return h + `</div>`;
+  }
   function rowsHtml(){
-    return f.exercicios.map((ex,i)=>`<div class="ex-edit-row">
+    return f.exercicios.map((ex,i)=>`<div class="ex-edit">
+      <div class="ex-edit-row">
       <input class="nome" placeholder="Exercício" value="${esc(ex.nome)}" oninput="window._ef.exercicios[${i}].nome=this.value">
-      <input inputmode="numeric" placeholder="Séries" value="${esc(ex.series)}" oninput="window._ef.exercicios[${i}].series=this.value">
+      <input inputmode="numeric" placeholder="Séries" value="${esc(ex.series)}" oninput="window._ef.exercicios[${i}].series=this.value" onchange="window._efSeries(${i})">
       <input placeholder="Reps" value="${esc(ex.reps)}" oninput="window._ef.exercicios[${i}].reps=this.value">
       <input inputmode="decimal" placeholder="Carga" value="${esc(ex.carga)}" oninput="window._ef.exercicios[${i}].carga=this.value">
       <input inputmode="numeric" placeholder="${DEFAULT_REST}" value="${esc(ex.descanso)}" oninput="window._ef.exercicios[${i}].descanso=this.value" title="Descanso em segundos">
       <button class="del" onclick="window._efDel(${i})">✕</button>
+      </div>
+      ${tagsHtml(i)}
     </div>`).join("");
   }
   window._ef = f;
   window._efDel = (i)=>{ f.exercicios.splice(i,1); $("#efRows").innerHTML = rowsHtml(); };
-  window._efAdd = ()=>{ f.exercicios.push({nome:"",series:"3",reps:"12",carga:"",descanso:String(DEFAULT_REST)}); $("#efRows").innerHTML = rowsHtml(); };
+  window._efAdd = ()=>{ f.exercicios.push({nome:"",series:"3",reps:"12",carga:"",descanso:String(DEFAULT_REST),tags:[]}); $("#efRows").innerHTML = rowsHtml(); };
+  window._efTag = (i,si)=>{
+    const ex=f.exercicios[i]; if(!ex.tags) ex.tags=[];
+    const cur=TAGS.indexOf(ex.tags[si]||"");
+    ex.tags[si]=TAGS[(cur+1)%TAGS.length];
+    document.getElementById("efTags"+i).outerHTML = tagsHtml(i);
+  };
+  window._efSeries = (i)=>{ document.getElementById("efTags"+i).outerHTML = tagsHtml(i); };
   window._efSalvar = ()=>{
     f.nome = (f.nome||"").trim();
     f.exercicios = f.exercicios.filter(e=> (e.nome||"").trim());
+    f.exercicios.forEach(e=>{
+      e.tags = (e.tags||[]).slice(0, parseInt(e.series)||1);
+      if(e.tags.every(t=>!t)) delete e.tags;
+    });
     if(!f.nome){ toast("Dê um nome à ficha"); return; }
     if(f.exercicios.length===0){ toast("Adicione ao menos 1 exercício"); return; }
     const idx = fichas.findIndex(x=>x.id===f.id);
@@ -663,8 +696,8 @@ window.editarFicha = function(fichaId){
 window.abrirImportCSV = ()=>{
   openModal(`<h2>Importar treino (CSV)</h2>
     <p class="muted" style="line-height:1.5">Monte a planilha no PC com estas colunas e salve como <b>CSV</b>:</p>
-    <p><code>treino, exercicio, series, repeticoes, carga, descanso</code></p>
-    <p class="muted">Cada linha = 1 exercício. A coluna <b>descanso</b> (em segundos, ex: 90) é opcional — sem ela, usa o padrão. Linhas com o mesmo "treino" viram a mesma ficha. Aceita separador vírgula <b>ou</b> ponto-e-vírgula.</p>
+    <p><code>treino, exercicio, series, repeticoes, carga, descanso, series_tags</code></p>
+    <p class="muted">Cada linha = 1 exercício. As colunas <b>descanso</b> (segundos, ex: 90) e <b>series_tags</b> são opcionais. Em <b>series_tags</b> use uma letra por série: <b>A</b> = 🔥 aquecimento, <b>P</b> = ⚡ preparação, resto normal (ex: <code>AP</code> = 1ª aquece, 2ª prepara). Linhas com o mesmo "treino" viram a mesma ficha. Aceita separador vírgula <b>ou</b> ponto-e-vírgula.</p>
     <input type="file" id="csvFile" accept=".csv,text/csv" style="margin:10px 0">
     <div class="row"><button class="btn-ghost full" onclick="closeModal()">Cancelar</button></div>`);
   $("#csvFile").addEventListener("change", e=>{
@@ -696,6 +729,19 @@ function parseCSV(text){
   return rows;
 }
 function norm(s){ return (s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").trim(); }
+function parseSeriesTags(raw){
+  // códigos por série: "AP" -> ["aquecimento","preparacao"]. A=aquec, P=prep, resto normal.
+  const s = String(raw||"").trim();
+  if(!s) return [];
+  // com separador (, ; | / espaço) preserva posições; senão, 1 letra por série
+  const codes = /[,;|/ ]/.test(s) ? s.split(/[,;|/ ]/) : [...s];
+  return codes.map(c=>{
+    const n = norm(c);
+    if(n[0]==="a") return "aquecimento";
+    if(n[0]==="p") return "preparacao";
+    return "";
+  });
+}
 
 function importarCSV(text){
   try{
@@ -710,6 +756,7 @@ function importarCSV(text){
       reps:   col(["repeticoes","repetições","reps","rep"]),
       carga:  col(["carga","peso","kg","carga(kg)"]),
       desc:   col(["descanso","descanso(s)","rest","intervalo","pausa"]),
+      tags:   col(["series_tags","tags","series_especiais","tipo_series","aquec_prep"]),
     };
     if(ci.ex<0){ toast("Falta a coluna 'exercicio'"); return; }
     const map = {};
@@ -727,6 +774,7 @@ function importarCSV(text){
         reps:(ci.reps>=0?row[ci.reps]:"")||"12",
         carga:(ci.carga>=0?row[ci.carga]:"")||"",
         descanso:descRaw,
+        tags: ci.tags>=0 ? parseSeriesTags(row[ci.tags]) : [],
       });
       count++;
     }
