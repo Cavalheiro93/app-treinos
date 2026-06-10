@@ -83,6 +83,9 @@
   .ex-head-main{flex:1; min-width:0; display:flex; flex-direction:column; gap:3px}
   .ex-head-main b{font-size:15px}
   .ex-head .target{color:var(--muted); font-size:12px; font-weight:600}
+  .ex-head .hist{color:var(--muted); font-size:11px; font-weight:600}
+  .ex-head .hist b{color:var(--txt); font-weight:700}
+  .ex-head .nudge{color:var(--ok); font-size:11px; font-weight:700}
   .ex-prog{flex:none; font-size:13px; font-weight:700; color:var(--muted); background:var(--card2);
     border:1px solid var(--line); border-radius:999px; padding:3px 10px; white-space:nowrap}
   .ex-prog.done{color:var(--ok); border-color:var(--ok); background:rgba(57,217,138,.12)}
@@ -350,6 +353,41 @@ function ultimaCargaExercicio(nomeEx){
   }
   return null;
 }
+function statsExercicio(nomeEx, refCarga){
+  // última = melhor série de trabalho do treino mais recente que tem o exercício
+  // melhor = maior nº de reps já feito na MESMA carga sugerida para hoje (refCarga)
+  const lower = nomeEx.toLowerCase();
+  const ref = parseFloat(refCarga);
+  const ord = [...sessoes].sort((a,b)=> b.data.localeCompare(a.data));
+  let ultima = null, melhor = null;
+  for(const s of ord){
+    const it = s.itens.find(i=>i.nome.toLowerCase()===lower);
+    if(!it) continue;
+    // só séries de trabalho (ignora aquecimento/preparação) com reps preenchidas
+    const work = it.sets.filter(x=>
+      x.tag!=="aquecimento" && x.tag!=="preparacao" && (parseInt(x.reps)||0)>0);
+    if(work.length===0) continue;
+    if(!ultima){
+      const best = work.reduce((m,x)=>
+        (parseInt(x.reps)||0) > (parseInt(m.reps)||0) ? x : m);
+      ultima = { reps: parseInt(best.reps)||0, carga: best.carga };
+    }
+    if(!isNaN(ref)){
+      for(const x of work){
+        if(parseFloat(x.carga) === ref){
+          const r = parseInt(x.reps)||0;
+          if(!melhor || r > melhor.reps) melhor = { reps:r, carga:ref };
+        }
+      }
+    }
+  }
+  return { ultima, melhor };
+}
+function topoMeta(repsStr){
+  // topo da faixa de reps da ficha: "10-12"->12, "12"->12, ""->null
+  const nums = String(repsStr||"").match(/\d+/g);
+  return nums ? Math.max(...nums.map(Number)) : null;
+}
 
 window.iniciarTreino = function(fichaId){
   const f = fichas.find(x=>x.id===fichaId);
@@ -387,11 +425,24 @@ function renderSessaoAtiva(v){
     const allDone = it.sets.every(x=>x.feito);
     const feitas = it.sets.filter(x=>x.feito).length;
     const aberto = !!it.aberto;
+    // histórico do exercício: última execução, recorde na carga atual e nudge de progressão
+    const refCarga = (it.sets[0] && it.sets[0].carga) || it.carga || "";
+    const st = statsExercicio(it.nome, refCarga);
+    const partes = [];
+    if(st.ultima) partes.push(`Última: <b>${st.ultima.reps}×${esc(st.ultima.carga)}kg</b>`);
+    if(st.melhor) partes.push(`Melhor: <b>${st.melhor.reps}×${st.melhor.carga}kg</b>`);
+    const histLinha = partes.length ? `<span class="hist">${partes.join(" · ")}</span>` : "";
+    const topo = topoMeta(it.reps);
+    const ref = parseFloat(refCarga);
+    const subir = st.ultima && topo!=null && !isNaN(ref)
+      && parseFloat(st.ultima.carga) === ref && st.ultima.reps >= topo;
+    const nudge = subir ? `<span class="nudge">🎯 hora de subir a carga</span>` : "";
     html += `<div class="ex ${allDone?'done':''} ${aberto?'open':''}">
       <div class="ex-head" onclick="toggleEx(${ei})">
         <div class="ex-head-main">
           <b>${esc(it.nome)}</b>
           <span class="target">meta: ${esc(it.series||'-')}×${esc(it.reps||'-')}${it.carga?` · ${esc(it.carga)}`:''}${it.descanso?` · 💤 ${it.descanso}s`:''}</span>
+          ${histLinha}${nudge}
         </div>
         <a class="ex-yt" href="https://www.youtube.com/results?search_query=${encodeURIComponent(it.nome + ' execução')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Ver execução no YouTube" aria-label="Ver execução no YouTube">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="#ff0000"/><path d="M10 8.5l6 3.5-6 3.5z" fill="#fff"/></svg>
