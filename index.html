@@ -237,8 +237,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.7";
-const APP_BUILD = "2026-06-10 · trocar exercício no meio do treino (só hoje ou permanente)";
+const APP_VERSION = "2.8";
+const APP_BUILD = "2026-06-12 · segurança: escape no histórico, validação do backup e ids em handlers";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -260,7 +260,7 @@ const FB_CONFIG = {
 
 let fichas  = DB.get(KEY_FICHAS, []);
 let sessoes = DB.get(KEY_SESS, []);
-let cfg     = DB.get(KEY_CFG, { descanso:90 });
+let cfg     = DB.get(KEY_CFG, { somModo:"mix" });
 let localUpdatedAt = DB.get(KEY_UPDATED, 0);
 
 function salvarFichas(){ DB.set(KEY_FICHAS, fichas); touchAndPush(); }
@@ -276,6 +276,10 @@ let sessaoAtiva = null; // {fichaId, fichaNome, itens:[{nome, series, reps, carg
 const $ = sel => document.querySelector(sel);
 const el = (tag, attrs={}, html="") => { const e=document.createElement(tag); for(const k in attrs) e.setAttribute(k, attrs[k]); if(html) e.innerHTML=html; return e; };
 function esc(s){ return String(s??"").replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+/* p/ interpolar valores em handlers inline (onclick="f(${jsStr(id)})"): só esc()
+   não basta — o HTML decodifica as entidades ANTES do JS rodar. JSON.stringify
+   escapa aspas/barras no nível do JS e o esc() protege o atributo HTML. */
+function jsStr(v){ return esc(JSON.stringify(String(v??""))) }
 
 let toastTimer;
 function toast(msg){
@@ -336,7 +340,7 @@ function renderTreinar(){
     <div class="muted">Toque numa ficha para iniciar o registro.</div></div>`;
   fichas.forEach(f=>{
     const ult = ultimaSessaoDaFicha(f.id);
-    html += `<div class="ficha-item" onclick="iniciarTreino('${f.id}')">
+    html += `<div class="ficha-item" onclick="iniciarTreino(${jsStr(f.id)})">
       <div class="ficha-badge">${esc((f.nome||'?').trim().charAt(0).toUpperCase())}</div>
       <div class="info">
         <b>${esc(f.nome)}</b>
@@ -610,7 +614,7 @@ function renderFichas(){
       <span>Crie manualmente ou importe um arquivo CSV do seu PC.</span></div>`;
   } else {
     fichas.forEach(f=>{
-      html += `<div class="ficha-item" onclick="editarFicha('${f.id}')">
+      html += `<div class="ficha-item" onclick="editarFicha(${jsStr(f.id)})">
         <div class="ficha-badge">${esc((f.nome||'?').trim().charAt(0).toUpperCase())}</div>
         <div class="info"><b>${esc(f.nome)}</b><span>${f.exercicios.length} exercícios</span></div>
         <div class="chev">✏️</div>
@@ -821,7 +825,11 @@ window.abrirRestore = ()=>{
     const rd=new FileReader();
     rd.onload=()=>{ try{
       const d=JSON.parse(rd.result);
-      if(d.fichas) fichas=d.fichas; if(d.sessoes) sessoes=d.sessoes; if(d.cfg) cfg=d.cfg;
+      // valida o formato antes de substituir qualquer coisa (mesmo critério do applyRemote)
+      if(!Array.isArray(d.fichas) && !Array.isArray(d.sessoes)){ toast("Arquivo inválido"); return; }
+      if(Array.isArray(d.fichas)) fichas=d.fichas;
+      if(Array.isArray(d.sessoes)) sessoes=d.sessoes;
+      if(d.cfg && typeof d.cfg==="object" && !Array.isArray(d.cfg)) cfg=d.cfg;
       salvarFichas(); salvarSessoes(); salvarCfg(); closeModal(); renderFichas(); toast("Backup restaurado ✓");
     }catch(err){ toast("Arquivo inválido"); } };
     rd.readAsText(file);
@@ -857,12 +865,12 @@ function renderHistorico(){
     html += `<div class="sess-item">
       <div class="top"><span class="data">${fmtData(s.data)}</span>
         <span class="pill">${esc(s.fichaNome)}</span><div class="spacer"></div>
-        <button class="del" onclick="excluirSessao('${s.id}')" style="background:none;border:none;color:var(--muted);font-size:18px">🗑️</button>
+        <button class="del" onclick="excluirSessao(${jsStr(s.id)})" style="background:none;border:none;color:var(--muted);font-size:18px">🗑️</button>
       </div>
       <details><summary>${s.itens.length} exercícios · ${totalSets} séries</summary>
         <ul>${s.itens.map(it=>{
           const melhor = it.sets.reduce((m,x)=> (parseFloat(x.carga)||0)>m ? (parseFloat(x.carga)||0):m, 0);
-          const det = it.sets.map(x=>{ const ti=tagInfo(x.tag); return `${ti?ti.emoji+' ':''}${x.carga||'–'}×${x.reps||'–'}`; }).join("  ·  ");
+          const det = it.sets.map(x=>{ const ti=tagInfo(x.tag); return `${ti?ti.emoji+' ':''}${esc(x.carga||'–')}×${esc(x.reps||'–')}`; }).join("  ·  ");
           return `<li><b style="color:var(--txt)">${esc(it.nome)}</b> — ${det}${melhor?` <span style="color:var(--ok)">(top ${melhor}kg)</span>`:''}</li>`;
         }).join("")}</ul>
       </details>
@@ -912,7 +920,7 @@ window.renderEvolucao = (nome)=>{
 window.excluirSessao = (id)=>{
   openModal(`<h2>Excluir este treino?</h2><p class="muted">Não dá para desfazer.</p>
     <div class="row"><button class="btn-ghost full" onclick="closeModal()">Voltar</button>
-    <button class="btn-danger full" onclick="window._delSess('${id}')">Excluir</button></div>`);
+    <button class="btn-danger full" onclick="window._delSess(${jsStr(id)})">Excluir</button></div>`);
 };
 window._delSess = (id)=>{ sessoes = sessoes.filter(s=>s.id!==id); salvarSessoes(); closeModal(); renderHistorico(); toast("Treino excluído"); };
 

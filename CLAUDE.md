@@ -16,8 +16,10 @@ iPhone/PC, sincroniza na nuvem (opcional) e não tem mensalidade/login obrigató
 ## Modelo de dados (localStorage, via `DB.get/set`)
 - `gym_fichas_v1` → `fichas`: `[{ id, nome, exercicios:[{nome, series, reps, carga, descanso}] }]`
   - **descanso é por exercício** (segundos). `DEFAULT_REST = 90` é só semente.
-- `gym_sessoes_v1` → `sessoes`: `[{ id, fichaId, fichaNome, data, itens:[{nome, series, reps, carga, descanso, fichaIdx, sets:[{carga, reps, feito, tag}]}] }]`
-- `gym_config_v1` → `cfg`: `{ descanso, somModo }` (`somModo`: `"mix"` ou `"bg"`).
+- `gym_sessoes_v1` → `sessoes`: `[{ id, fichaId, fichaNome, data, itens:[{nome, series, reps, carga, sets:[{carga, reps, feito, tag}]}] }]`
+  - `descanso` e `fichaIdx` existem **só na `sessaoAtiva`** (em memória) — o
+    `finalizarTreino` descarta esses campos ao salvar no histórico.
+- `gym_config_v1` → `cfg`: `{ somModo }` (`"mix"` ou `"bg"`).
 - `gym_updated_v1` → `localUpdatedAt`: carimbo p/ a sincronização (LWW).
 - Sessão de treino em andamento: `sessaoAtiva` (em memória, **não** persistida).
 
@@ -48,8 +50,10 @@ interruptor (`cfg.somModo`):
 - A faixa é WAV gerada em runtime (Blob URL), nunca arquivo externo.
 
 ## Convenções / helpers
-- Helpers: `DB.get/set`, `esc()` (anti-XSS em templates), `uid()`, `el()`, `toast()`,
-  `openModal/closeModal`, `go(tab)`. Funções de UI rendem HTML por string.
+- Helpers: `DB.get/set`, `esc()` (anti-XSS em templates), `jsStr()` (p/ interpolar
+  valores em handlers inline tipo `onclick` — `esc()` sozinho não basta lá),
+  `uid()`, `el()`, `toast()`, `openModal/closeModal`, `go(tab)`. Funções de UI
+  rendem HTML por string — **todo dado dinâmico passa por `esc()`/`jsStr()`**.
 - **Selo de versão** (`#verBadge`) no topo mostra `v{APP_VERSION}`; tocar = "Forçar
   atualização" (desregistra SW + limpa caches + reload com cache-buster).
 - CSV de fichas: colunas `treino, exercicio, series, repeticoes, carga, descanso`
@@ -60,7 +64,8 @@ interruptor (`cfg.somModo`):
 ## Deploy e ambiente (LER ANTES DE MEXER)
 - **O ambiente é efêmero e costuma re-clonar uma versão ANTIGA.** Sempre comece com:
   `git fetch origin && git reset --hard origin/main` (a `main` é a fonte da verdade).
-- Branch de trabalho: `claude/exercise-summary-view-36flg3`. Push: `git push -u origin HEAD:<branch>`.
+- Branch de trabalho: a branch `claude/...` indicada na sessão atual (muda a cada
+  sessão). Push: `git push -u origin HEAD:<branch>`.
 - **O Netlify publica a `main`.** Mudanças só chegam ao app após **PR → merge na main**.
   Não basta commitar na branch.
 - A cada mudança publicável:
