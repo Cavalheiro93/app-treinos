@@ -25,6 +25,10 @@ Monte uma planilha no Excel com estas colunas:
 | Treino A | Crucifixo | 3 | 12 | 16 |
 | Treino B | Agachamento | 4 | 10 | 60 |
 
+Colunas opcionais: **descanso** (segundos entre as séries, ex: 90) e
+**series_tags** (uma letra por série: **A** = 🔥 aquecimento, **P** = ⚡ preparação;
+ex: `AP` marca a 1ª série como aquecimento e a 2ª como preparação).
+
 - Salve como **CSV** (vírgula ou ponto-e-vírgula — os dois funcionam).
 - Mande o arquivo pro iPhone (e-mail, WhatsApp, iCloud Drive...).
 - No app: **Fichas → 📄 CSV → escolher arquivo**.
