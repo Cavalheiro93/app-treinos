@@ -152,6 +152,12 @@
     display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none}
   .ef-chip.aquec{background:rgba(255,176,32,.16); border-color:var(--warn); color:var(--warn)}
   .ef-chip.prep{background:rgba(79,140,255,.16); border-color:var(--accent); color:var(--accent)}
+  .ef-move{margin-left:auto; display:flex; gap:4px}
+  .ef-mv{width:32px; height:26px; padding:0; border-radius:8px; background:var(--card2);
+    border:1px solid var(--line); color:var(--txt); font-size:12px; line-height:1;
+    display:flex; align-items:center; justify-content:center; cursor:pointer}
+  .ef-mv:disabled{opacity:.3; cursor:default}
+  .ef-mv:active:not(:disabled){background:var(--line)}
   .edit-head{display:grid; grid-template-columns:1fr 42px 50px 50px 50px 26px; gap:5px; margin-bottom:5px}
   .edit-head span{font-size:10px; color:var(--muted); text-align:center; font-weight:700; text-transform:uppercase}
 
@@ -237,8 +243,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.8";
-const APP_BUILD = "2026-06-12 · segurança: escape no histórico, validação do backup e ids em handlers";
+const APP_VERSION = "2.9";
+const APP_BUILD = "2026-06-15 · reordenar exercícios (subir/descer) na edição da ficha";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -642,6 +648,10 @@ window.editarFicha = function(fichaId){
       const ti = tagInfo(ex.tags[si]||"");
       h += `<span class="ef-chip ${ti?ti.cls:''}" onclick="window._efTag(${i},${si})" title="Toque: normal → 🔥 → ⚡">${ti?ti.emoji:(si+1)}</span>`;
     }
+    h += `<span class="ef-move">
+      <button type="button" class="ef-mv" onclick="window._efMove(${i},-1)" ${i===0?'disabled':''} title="Subir exercício">▲</button>
+      <button type="button" class="ef-mv" onclick="window._efMove(${i},1)" ${i===f.exercicios.length-1?'disabled':''} title="Descer exercício">▼</button>
+    </span>`;
     return h + `</div>`;
   }
   function rowsHtml(){
@@ -659,6 +669,13 @@ window.editarFicha = function(fichaId){
   }
   window._ef = f;
   window._efDel = (i)=>{ f.exercicios.splice(i,1); $("#efRows").innerHTML = rowsHtml(); };
+  window._efMove = (i,dir)=>{
+    const j = i+dir;
+    if(j<0 || j>=f.exercicios.length) return;
+    const arr = f.exercicios;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    $("#efRows").innerHTML = rowsHtml();
+  };
   window._efAdd = ()=>{ f.exercicios.push({nome:"",series:"3",reps:"12",carga:"",descanso:String(DEFAULT_REST),tags:[]}); $("#efRows").innerHTML = rowsHtml(); };
   window._efTag = (i,si)=>{
     const ex=f.exercicios[i]; if(!ex.tags) ex.tags=[];
