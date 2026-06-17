@@ -243,8 +243,8 @@ const DB = {
   get(k, def){ try{ const v = localStorage.getItem(k); return v==null ? def : JSON.parse(v) }catch(e){ return def } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) },
 };
-const APP_VERSION = "2.9";
-const APP_BUILD = "2026-06-15 · reordenar exercícios (subir/descer) na edição da ficha";
+const APP_VERSION = "3.0";
+const APP_BUILD = "2026-06-17 · modo 2º plano: tique suave por segundo p/ manter o alarme vivo no iOS";
 const DEFAULT_REST = 90;   // semente p/ novos exercícios (não há mais descanso global)
 const KEY_FICHAS = "gym_fichas_v1";
 const KEY_SESS   = "gym_sessoes_v1";
@@ -947,6 +947,7 @@ let alarming=false, alarmVibInt=null;
 let audioCtx=null, oscAlarm=null;            // Web Audio é só fallback agora
 let timerAudio=null, audioUrl=null, mediaReady=false;
 const ALARM_TAIL=120;   // segundos de apitos gravados após o tempo zerar
+const ALARM_TICK=0.07;  // volume do tique suave por segundo (modo bg) p/ manter o áudio vivo no iOS
 
 /* ---- Áudio do descanso num ÚNICO elemento <audio> ----
    A faixa é gerada na hora: SILÊNCIO (a duração do descanso) seguido dos
@@ -958,7 +959,8 @@ const ALARM_TAIL=120;   // segundos de apitos gravados após o tempo zerar
    reprodução contínua entrando na parte sonora. Usamos Blob URL (não data URI)
    p/ aguentar faixas de vários MB sem o custo do base64. */
 function wavBlobUrl(buf){ try{ return URL.createObjectURL(new Blob([buf], {type:"audio/wav"})); }catch(e){ return null; } }
-function buildTimerWav(silenceSecs, tailSecs){
+function buildTimerWav(silenceSecs, tailSecs, tickVol){
+  tickVol=tickVol||0;
   const sr=8000;
   const silN=Math.max(0, Math.floor(silenceSecs*sr));
   const tailN=Math.max(0, Math.floor(tailSecs*sr));
@@ -970,8 +972,18 @@ function buildTimerWav(silenceSecs, tailSecs){
   dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true);
   wr(36,"data"); dv.setUint32(40,total*2,true);
   const pcm=new Int16Array(buf, 44, total);
-  // silêncio: tom inaudível só p/ manter a sessão de áudio do iOS viva
-  for(let i=0;i<silN;i++) pcm[i]=Math.sin(2*Math.PI*60*i/sr)*0.0004*32767;
+  // manutenção: portadora quase muda (mantém o buffer != 0) +, se tickVol>0, um
+  // tique suave por segundo. O iOS só sustenta áudio em 2º plano que seja DE FATO
+  // audível; o tique evita que ele suspenda a faixa antes de chegar nos apitos.
+  const tickLen=Math.floor(sr*0.03);   // ~30ms por tique
+  for(let i=0;i<silN;i++){
+    let v=Math.sin(2*Math.PI*60*i/sr)*0.0004;
+    if(tickVol>0){
+      const ph=i%sr;   // amostra dentro do segundo atual
+      if(ph<tickLen){ const env=Math.min(1, ph/40, (tickLen-ph)/40); v+=Math.sin(2*Math.PI*1000*i/sr)*tickVol*env; }
+    }
+    pcm[i]=v*32767;
+  }
   // alarme: apitos alternando 880/1320Hz (0,2s tom + 0,2s pausa)
   const period=0.4, onDur=0.2;
   for(let i=0;i<tailN;i++){
@@ -1038,7 +1050,7 @@ function armAudioTimer(secs){
   try{
     aplicarAudioSession();   // bg→"playback" (interrompe, toca bloqueado)
     if(audioUrl){ try{URL.revokeObjectURL(audioUrl);}catch(e){} audioUrl=null; }
-    audioUrl=wavBlobUrl(buildTimerWav(Math.max(0,secs), ALARM_TAIL));
+    audioUrl=wavBlobUrl(buildTimerWav(Math.max(0,secs), ALARM_TAIL, ALARM_TICK));
     if(!audioUrl) return;
     timerAudio.muted=false; timerAudio.volume=1; timerAudio.loop=false;
     timerAudio.src=audioUrl; timerAudio.currentTime=0;
@@ -1265,7 +1277,7 @@ function somBoxHtml(){
       Modo atual: <b style="color:var(--txt)">${mix?"🎵 Misturar com a música":"🔔 Alarme em 2º plano"}</b><br>
       ${mix
         ? "A música continua tocando o descanso inteiro e abaixa só no apito do alarme (volta depois). Funciona com o app aberto/tela ligada; não toca com a tela bloqueada."
-        : "O alarme tenta tocar mesmo com a tela bloqueada, mas interrompe a música de outros apps."}
+        : "Toca um tique baixo durante o descanso (ajuda o alarme a soar com a tela bloqueada/outro app aberto) e os apitos no fim. Interrompe a música de outros apps."}
     </p>
     <button class="btn-ghost full" onclick="window._toggleSom()">Mudar para ${mix?"🔔 Alarme em 2º plano":"🎵 Misturar com a música"}</button>
     ${apiOk?"":`<p class="muted" style="font-size:11px; margin-top:6px">Obs: este navegador pode não suportar misturar com a música (recurso do Safari iOS 16.4+).</p>`}`;
